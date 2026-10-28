@@ -222,15 +222,6 @@ replayList.querySelectorAll<HTMLButtonElement>('[data-replay]').forEach((button)
   button.addEventListener('click', () => startMission(button.dataset.replay as LevelId));
 });
 
-$('demo-form').addEventListener('submit', (event) => {
-  event.preventDefault();
-  const input = $('demo-command') as HTMLInputElement;
-  if (!input.value.trim()) return;
-  scene.submitWire(input.value, 'DEMO', 'LOCAL_DEMO');
-  input.value = '';
-  input.focus();
-});
-
 $('authorize-button').addEventListener('click', (event) => {
   event.preventDefault();
   connectError.textContent = '';

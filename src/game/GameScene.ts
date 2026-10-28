@@ -57,7 +57,6 @@ export class GameScene extends Phaser.Scene {
   private pendingCommands: Array<{ raw: string; owner: string; actorId: string }> = [];
   private pendingPilotHits = 0;
   private partWidgets = new Map<PartId, PartWidget>();
-  private testPanel!: Phaser.GameObjects.Container;
   private lastDraw = 0;
   private lastReportedEvent = '';
   private reducedMotion = false;
@@ -81,13 +80,12 @@ export class GameScene extends Phaser.Scene {
     this.add.text(BOARD_ORIGIN_X, 229, 'POWER ROUTING', { fontFamily: FONT_DISPLAY, fontSize: '18px', color: '#6ef0d6', fontStyle: 'bold', letterSpacing: 2 }).setOrigin(0, 0.5).setDepth(3);
     this.boardTitle = this.add.text(BOARD_ORIGIN_X, 251, '', { fontFamily: FONT_DATA, fontSize: '12px', color: '#dbe9ee', letterSpacing: 0.6 }).setOrigin(0, 0.5).setDepth(3);
     this.boardPage = this.add.text(632, 229, '', { fontFamily: FONT_DATA, fontSize: '11px', color: '#93a8b6' }).setOrigin(0.5, 0.5).setDepth(3);
-    this.repairStatus = this.add.text(711, 690, '', { fontFamily: FONT_DATA, fontSize: '10px', color: '#6ef0d6' }).setOrigin(1, 0.5).setDepth(3);
+    this.repairStatus = this.add.text(711, 630, '', { fontFamily: FONT_DATA, fontSize: '10px', color: '#6ef0d6' }).setOrigin(1, 0.5).setDepth(3);
     this.exitText = this.add.text(FLIGHT_ARENA.x + FLIGHT_ARENA.width / 2, FLIGHT_ARENA.y + 29, 'EXIT LOCKED', { fontFamily: FONT_DATA, fontSize: '11px', color: '#ffd17d', fontStyle: 'bold', letterSpacing: 1.5 }).setOrigin(0.5, 0.5).setDepth(3);
     this.twitchStatus = this.add.text(1164, 45, 'DEMO MODE', { fontFamily: FONT_DATA, fontSize: '11px', color: '#f3c575', letterSpacing: 1.4 }).setOrigin(1, 0.5).setDepth(3);
 
     this.createBoardNavigation();
     this.createPartWidgets();
-    this.createTestPanel();
     this.refreshBoardLabels();
     this.updatePartWidgets();
     this.drawBoard();
@@ -281,7 +279,7 @@ export class GameScene extends Phaser.Scene {
       const column = index % 3;
       const row = Math.floor(index / 3);
       const x = 68 + column * (PART_WIDTH + PART_GAP);
-      const y = 710 + row * (PART_HEIGHT + 8);
+      const y = 660 + row * (PART_HEIGHT + 8);
       const root = this.add.container(x, y).setDepth(3);
       const background = this.add.graphics();
       const flash = this.add.graphics().setAlpha(0);
@@ -293,7 +291,7 @@ export class GameScene extends Phaser.Scene {
       this.partWidgets.set(id, widget);
       this.drawPartWidget(widget, 0);
     });
-    this.add.text(68, 690, 'AIRFRAME SYSTEMS', { fontFamily: FONT_DISPLAY, fontSize: '18px', color: '#dbe9ee', fontStyle: 'bold', letterSpacing: 1.8 }).setOrigin(0, 0.5).setDepth(3);
+    this.add.text(68, 640, 'AIRFRAME SYSTEMS', { fontFamily: FONT_DISPLAY, fontSize: '18px', color: '#dbe9ee', fontStyle: 'bold', letterSpacing: 1.8 }).setOrigin(0, 0.5).setDepth(3);
   }
 
   private drawPartWidget(widget: PartWidget, level: PartLevel): void {
@@ -352,31 +350,19 @@ export class GameScene extends Phaser.Scene {
     this.tweens.killTweensOf(widget.status);
     widget.root.setScale(1);
     widget.flash.clear();
-    widget.flash.lineStyle(3, type === 'repaired' ? 0x75f0cd : level === 3 ? 0xff5f52 : 0x6ef0d6, 1);
+    const isDestroyed = level === 3;
+    const flashColor = type === 'repaired' ? 0x75f0cd : isDestroyed ? 0xff5f52 : 0x6ef0d6;
+    widget.flash.lineStyle(3, flashColor, 1);
     widget.flash.strokeRoundedRect(1, 1, PART_WIDTH - 2, PART_HEIGHT - 2, 5);
     widget.flash.setAlpha(1);
-    this.tweens.add({ targets: widget.root, scaleX: 1.08, scaleY: 1.08, duration: 120, yoyo: true, ease: 'Cubic.Out' });
-    this.tweens.add({ targets: widget.flash, alpha: 0, duration: level === 3 ? 300 : type === 'repaired' ? 180 : 200, ease: 'Cubic.Out' });
+    // Scale punch: spec says 1.15 for hit
+    const scaleAmount = isDestroyed ? 1.15 : type === 'repaired' ? 1.1 : 1.15;
+    this.tweens.add({ targets: widget.root, scaleX: scaleAmount, scaleY: scaleAmount, duration: 120, yoyo: true, ease: 'Cubic.Out' });
+    // Flash fade duration per spec
+    const flashDuration = isDestroyed ? 300 : type === 'repaired' ? 180 : 200;
+    this.tweens.add({ targets: widget.flash, alpha: 0, duration: flashDuration, ease: 'Cubic.Out' });
     widget.status.setAlpha(0.3);
     this.tweens.add({ targets: widget.status, alpha: 1, duration: 200, ease: 'Cubic.Out' });
-  }
-
-  private createTestPanel(): void {
-    this.makeButton('TEST', 1514, 93, 92, 34, () => this.testPanel.setVisible(!this.testPanel.visible), true);
-    this.testPanel = this.add.container(1350, 140).setDepth(8).setVisible(false);
-    const bg = this.add.graphics(); bg.fillStyle(0x0b131c, 0.98); bg.lineStyle(1, 0x263a48, 1); bg.fillRoundedRect(0, 0, 240, 172, 8); bg.strokeRoundedRect(0, 0, 240, 172, 8);
-    const title = this.add.text(14, 14, 'LOCAL SIMULATION', { fontFamily: FONT_DATA, fontSize: '10px', color: '#93a8b6', letterSpacing: 1 });
-    this.testPanel.add([bg, title]);
-    const entries: Array<[string, () => void]> = [
-      ['+100 CHATTERS', () => this.simulateChatters(100)],
-      ['+1,000 CHATTERS', () => this.simulateChatters(1000)],
-      ['+10,000 CHATTERS', () => this.simulateChatters(10000)],
-      ['SIMULATE HIT', () => this.simulateHit()],
-    ];
-    entries.forEach(([label, action], index) => {
-      const button = this.makeButton(label, 12, 29 + index * 33, 216, 28, action, true);
-      this.testPanel.add(button);
-    });
   }
 
   private makeButton(label: string, x: number, y: number, width: number, height: number, action: () => void, compact = false): Phaser.GameObjects.Container {
