@@ -1,13 +1,22 @@
 import Phaser from 'phaser';
+import { createCampaign, decodeCampaign, decodeSettings, nextCampaignMission, recordMissionResult, CAMPAIGN_STORAGE_KEY, SETTINGS_STORAGE_KEY, type CampaignSave, type DisplaySettings } from './core/campaign';
+import type { LevelId } from './core/game';
 import { GameScene } from './game/GameScene';
-import { LEVELS, type LevelId } from './core/game';
 import { TwitchChat, type TwitchConnectionState } from './twitch/TwitchChat';
 import './style.css';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const connectDialog = $('connect-dialog') as HTMLDialogElement;
+const settingsDialog = $('settings-dialog') as HTMLDialogElement;
+const newSaveDialog = $('new-save-dialog') as HTMLDialogElement;
 const clientIdInput = $('client-id-input') as HTMLInputElement;
 const connectError = $('connect-error');
+const menuScreen = $('menu-screen');
+const resultScreen = $('result-screen');
+const continueButton = $('continue-button') as HTMLButtonElement;
+const newSaveButton = $('new-save-button') as HTMLButtonElement;
+const connectButton = $('connect-button') as HTMLButtonElement;
+const replayList = $('replay-list');
 const envClientId = import.meta.env.VITE_TWITCH_CLIENT_ID ?? '';
 clientIdInput.value = envClientId;
 
@@ -15,167 +24,211 @@ const scene = new GameScene();
 const game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: 'game-root',
-  width: 1240,
-  height: 760,
-  backgroundColor: '#0a111b',
+  width: 1600,
+  height: 900,
+  backgroundColor: '#080d14',
   antialias: true,
-  scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH, width: 1240, height: 760 },
+  scale: { mode: Phaser.Scale.RESIZE, autoCenter: Phaser.Scale.CENTER_BOTH, width: 1600, height: 900 },
   scene: [scene],
 });
 
-const overlay = $('round-overlay');
-const overlayTitle = $('overlay-title');
-const overlayCopy = $('overlay-copy');
-const gameFrame = document.querySelector('.game-frame') as HTMLElement;
+let campaign = loadCampaign();
+let settings = loadSettings();
+let toastTimer = 0;
+let twitchState: TwitchConnectionState = 'disconnected';
+const toast = $('event-toast');
+const reduceMotionInput = $('reduced-motion') as HTMLInputElement;
+const screenShakeInput = $('screen-shake') as HTMLInputElement;
+const uiScaleInput = $('ui-scale') as HTMLInputElement;
 
-/** emil-design-eng: screen shake on hit — transient, interruptible, then cleanup. */
-function shakeGameFrame(): void {
-  gameFrame.classList.add('shake');
-  setTimeout(() => gameFrame.classList.remove('shake'), 400);
+function readStorage(key: string): string | null {
+  try { return localStorage.getItem(key); } catch { return null; }
 }
 
-/** @starting-style fallback for browsers that don't support it (Safari, older Chrome). */
-function applyStartingStyleFallback(): void {
-  if (CSS.supports('starting-style: 0')) return;
-  const observer = new MutationObserver((mutations) => {
-    for (const mutation of mutations) {
-      if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
-        const el = mutation.target as HTMLElement;
-        if (el.classList.contains('round-overlay') && !el.classList.contains('hidden')) {
-          const card = el.querySelector('.overlay-card') as HTMLElement | null;
-          if (card) {
-            card.style.opacity = '0';
-            card.style.transform = 'scale(0.94)';
-            requestAnimationFrame(() => {
-              card.style.opacity = '1';
-              card.style.transform = 'scale(1)';
-            });
-          }
-        }
-      }
+function writeStorage(key: string, value: unknown): void {
+  try { localStorage.setItem(key, JSON.stringify(value)); }
+  catch { showToast('Browser storage is unavailable. Progress will last for this session only.', false); }
+}
+
+function loadCampaign(): CampaignSave | null {
+  return decodeCampaign(readStorage(CAMPAIGN_STORAGE_KEY));
+}
+
+function loadSettings(): DisplaySettings {
+  return decodeSettings(readStorage(SETTINGS_STORAGE_KEY));
+}
+
+function saveCampaign(): void {
+  if (campaign) writeStorage(CAMPAIGN_STORAGE_KEY, campaign);
+  updateMenuActions();
+}
+
+function saveSettings(): void {
+  writeStorage(SETTINGS_STORAGE_KEY, settings);
+  applySettings();
+}
+
+function applySettings(): void {
+  document.documentElement.style.setProperty('--ui-scale', String(settings.uiScale));
+  document.documentElement.dataset.reducedMotion = String(settings.reducedMotion);
+  scene.setDisplaySettings(settings);
+  uiScaleInput.value = String(settings.uiScale);
+  $('ui-scale-value').textContent = `${Math.round(settings.uiScale * 100)}%`;
+  reduceMotionInput.checked = settings.reducedMotion;
+  screenShakeInput.checked = settings.screenShake;
+}
+
+function updateMenuActions(): void {
+  const hasCampaign = Boolean(campaign);
+  continueButton.hidden = !hasCampaign;
+  newSaveButton.textContent = hasCampaign ? 'NEW SAVE' : 'START STANDARD ROUTING';
+  newSaveButton.classList.toggle('action-primary', !hasCampaign);
+  newSaveButton.classList.toggle('action-secondary', hasCampaign);
+}
+
+function setScreen(screen: 'menu' | 'play' | 'result'): void {
+  menuScreen.hidden = screen !== 'menu';
+  resultScreen.hidden = screen !== 'result';
+  document.body.classList.toggle('is-playing', screen === 'play');
+  if (screen !== 'menu') replayList.hidden = true;
+}
+
+function startMission(mission: LevelId): void {
+  if (!campaign) campaign = createCampaign();
+  saveCampaign();
+  setScreen('play');
+  scene.startRun(mission);
+}
+
+function continueCampaign(): void {
+  if (!campaign) return;
+  const next = nextCampaignMission(campaign);
+  if (next === 'replay') {
+    replayList.hidden = false;
+    replayList.querySelector<HTMLButtonElement>('[data-replay="standard"]')?.focus();
+    return;
+  }
+  startMission(next);
+}
+
+function startNewCampaign(): void {
+  campaign = createCampaign();
+  saveCampaign();
+  startMission('standard');
+}
+
+function returnToMenu(): void {
+  setScreen('menu');
+  updateMenuActions();
+  (campaign ? $('continue-button') : $('new-save-button')).focus();
+}
+
+function showResult(mission: LevelId, won: boolean, summary: string): void {
+  const next = $('result-primary') as HTMLButtonElement;
+  $('result-title').textContent = won ? 'CREW EXTRACTION' : 'SORTIE LOST';
+  $('result-title').classList.toggle('is-loss', !won);
+  $('result-kicker').textContent = won ? 'FLIGHT REPORT / COMPLETE' : 'FLIGHT REPORT / SYSTEMS DOWN';
+  $('result-copy').textContent = `${summary} ${campaign?.completedMissions.length ?? 0}/2 missions secured.`;
+  if (!won) {
+    next.textContent = 'RETRY THIS SORTIE';
+    next.onclick = () => startMission(mission);
+  } else if (mission === 'standard') {
+    next.textContent = 'CONTINUE TO AND-GATE ROUTING';
+    next.onclick = () => startMission('logic');
+  } else {
+    next.textContent = 'CHOOSE A MISSION TO REPLAY';
+    next.onclick = () => {
+      setScreen('menu');
+      updateMenuActions();
+      replayList.hidden = false;
+      replayList.querySelector<HTMLButtonElement>('[data-replay="standard"]')?.focus();
+    };
+  }
+  setScreen('result');
+  next.focus();
+}
+
+function showToast(message: string, good: boolean): void {
+  if (!message) return;
+  toast.textContent = message;
+  toast.dataset.tone = good ? 'good' : 'caution';
+  toast.hidden = false;
+  window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => { toast.hidden = true; }, 3000);
+}
+
+function updateConnection(message: string, state: TwitchConnectionState): void {
+  twitchState = state;
+  const status = $('menu-channel-status');
+  status.textContent = state === 'connected' ? 'CHANNEL / TWITCH CONNECTED' : state === 'connecting' ? 'CHANNEL / CONNECTING' : 'CHANNEL / DEMO MODE';
+  status.dataset.state = state;
+  connectButton.textContent = state === 'connected' ? 'DISCONNECT TWITCH' : state === 'connecting' ? 'CONNECTING…' : 'CONNECT TWITCH CHANNEL';
+  connectButton.disabled = state === 'connecting';
+  scene.setTwitchStatus(message, state);
+}
+
+function requestConnect(): void {
+  connectError.textContent = '';
+  if (envClientId.trim()) {
+    clientIdInput.value = envClientId.trim();
+    try { twitch.connect(envClientId); }
+    catch (error) {
+      connectError.textContent = error instanceof Error ? error.message : 'Could not start Twitch authorization.';
+      connectDialog.showModal();
     }
-  });
-  observer.observe(overlay, { attributes: true, subtree: false });
+  } else {
+    connectDialog.showModal();
+    clientIdInput.focus();
+  }
 }
 
-applyStartingStyleFallback();
-const startButtons: Array<[LevelId, HTMLButtonElement]> = [
-  ['standard', $('start-standard') as HTMLButtonElement],
-  ['logic', $('start-logic') as HTMLButtonElement],
-];
-const dangerValue = $('danger-value');
-const dangerFill = $('danger-fill');
-const boardStatus = $('board-status');
-const boardList = $('board-list');
-const feed = $('event-feed');
-let feedItems: string[] = [];
-let lastBoardSignature = '';
+const twitch = new TwitchChat(
+  ({ username, chatterId, text }) => scene.submitWire(text, username, chatterId),
+  updateConnection,
+  (chatterId) => scene.noteChatter(chatterId),
+  (message) => showToast(message, false),
+);
 
-function addFeed(message: string, good: boolean): void {
-  feedItems.unshift(`${good ? '✓' : '!' } ${message}`);
-  feedItems = feedItems.slice(0, 3);
-  feed.replaceChildren(...feedItems.map((item) => {
-    const line = document.createElement('p');
-    line.textContent = item;
-    return line;
-  }));
-  // emil-design-eng: transient screen shake on hit — immediate, bounded, cleans up
-  if (message.startsWith('IMPACT')) shakeGameFrame();
-}
-
-scene.onEvent = addFeed;
-scene.onState = (state) => {
-  const level = LEVELS[state.levelId];
-  $('mission-label').textContent = `ROUTING TEMPLATE / ${level.title.toUpperCase()}`;
-  $('mission-copy').textContent = `Chat shares the selected routing board by default. Choose another board below or target it with !bN. Pilot through the bullet patterns; power every board, then reach the exit.`;
-  dangerValue.textContent = `${Math.round(state.danger)}%`;
-  (dangerFill as HTMLElement).style.width = `${state.danger}%`;
-  (dangerFill as HTMLElement).classList.toggle('critical', state.danger > 68);
-  boardStatus.textContent = `${state.boards.length} / ${state.boardCapacity} boards · ${state.activeChatterCount} unique active chatters`;
-  const boardSignature = `${scene.getDisplayedBoardId() ?? ''}|${state.boards.map((board) => {
-    const recent = board.lastActivityAt !== null && Date.now() - board.lastActivityAt < 30_000;
-    return `${board.id}:${board.levelId}:${board.solved}:${board.placementCount}:${recent}`;
-  }).join('|')}`;
-  if (boardSignature !== lastBoardSignature) {
-    lastBoardSignature = boardSignature;
-    boardList.replaceChildren(...state.boards.map((board) => {
-      const chip = document.createElement('button');
-      chip.type = 'button';
-      chip.dataset.boardId = String(board.id);
-      chip.className = `board-chip board-select${board.solved ? ' online' : ''}${scene.getDisplayedBoardId() === board.id ? ' selected' : ''}`;
-      chip.title = `Show B${board.id} in the routing panel`;
-      const recent = board.lastActivityAt !== null && Date.now() - board.lastActivityAt < 30_000;
-      chip.textContent = `B${board.id} · ${board.levelId === 'logic' ? 'AND' : 'STANDARD'} · ${board.solved ? 'ONLINE' : 'ROUTE PENDING'} · ${board.placementCount} ${board.placementCount === 1 ? 'move' : 'moves'} · ${recent ? 'ACTIVE' : 'QUIET'}`;
-      return chip;
-    }));
-  }
-  (['simulate-100-chatters', 'simulate-1000-chatters', 'simulate-10000-chatters'] as const).forEach((id) => {
-    ($(id) as HTMLButtonElement).disabled = state.phase !== 'playing';
-  });
-  ($('simulate-hit') as HTMLButtonElement).disabled = state.phase !== 'playing';
-  if (state.phase === 'won' || state.phase === 'lost') {
-    overlay.classList.remove('hidden');
-    overlayTitle.textContent = state.phase === 'won' ? 'Crew extraction complete.' : 'The circuit went dark.';
-    const shorts = state.boards.reduce((total, board) => total + board.shorts, 0);
-    overlayCopy.textContent = `${state.lastEvent} Run time ${Math.floor(state.elapsed)}s · Shorts ${shorts} · Boards ${state.boards.filter((board) => board.solved).length}/${state.boards.length}.`;
-  }
+scene.onConnectRequest = requestConnect;
+scene.onDisconnectRequest = () => twitch.disconnect();
+scene.onEvent = showToast;
+scene.onRoundEnd = (mission, won, summary) => {
+  if (campaign) campaign = recordMissionResult(campaign, mission, won);
+  saveCampaign();
+  showResult(mission, won, summary);
 };
 
-startButtons.forEach(([levelId, button]) => button.addEventListener('click', () => {
-  scene.startRun(levelId);
-  overlay.classList.add('hidden');
-}));
+applySettings();
+updateMenuActions();
+setScreen('menu');
+
+$('continue-button').addEventListener('click', continueCampaign);
+newSaveButton.addEventListener('click', () => {
+  if (campaign) newSaveDialog.showModal();
+  else startNewCampaign();
+});
+$('confirm-new-save').addEventListener('click', (event) => {
+  event.preventDefault();
+  newSaveDialog.close();
+  startNewCampaign();
+});
+$('settings-button').addEventListener('click', () => settingsDialog.showModal());
+connectButton.addEventListener('click', () => {
+  if (twitchState === 'connected') twitch.disconnect();
+  else if (twitchState === 'disconnected') requestConnect();
+});
+$('result-menu').addEventListener('click', returnToMenu);
+replayList.querySelectorAll<HTMLButtonElement>('[data-replay]').forEach((button) => {
+  button.addEventListener('click', () => startMission(button.dataset.replay as LevelId));
+});
 
 $('demo-form').addEventListener('submit', (event) => {
   event.preventDefault();
   const input = $('demo-command') as HTMLInputElement;
   if (!input.value.trim()) return;
-  scene.submitWire(input.value, 'DEMO');
+  scene.submitWire(input.value, 'DEMO', 'LOCAL_DEMO');
   input.value = '';
   input.focus();
-});
-
-const twitch = new TwitchChat(
-  ({ username, text }) => scene.submitWire(text, username),
-  (message, connectionState: TwitchConnectionState) => {
-    $('connection-label').textContent = message;
-    const connected = connectionState === 'connected';
-    const canDisconnect = connectionState !== 'disconnected';
-    $('connection-dot').classList.toggle('is-connected', connected);
-    $('connect-button').classList.toggle('hidden', canDisconnect);
-    $('disconnect-button').classList.toggle('hidden', !canDisconnect);
-    if (message !== 'DEMO MODE') addFeed(message, connected);
-  },
-  (chatterId) => scene.noteChatter(chatterId),
-  (message) => addFeed(message, false),
-);
-
-$('simulate-100-chatters').addEventListener('click', () => scene.simulateChatters(100));
-$('simulate-1000-chatters').addEventListener('click', () => scene.simulateChatters(1000));
-$('simulate-10000-chatters').addEventListener('click', () => scene.simulateChatters(10000));
-boardList.addEventListener('click', (event) => {
-  const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-board-id]');
-  if (button) scene.selectBoard(Number(button.dataset.boardId));
-});
-$('simulate-hit').addEventListener('click', () => scene.simulateHit());
-const testFeaturesPanel = $('test-features-panel') as HTMLDetailsElement;
-const testFeaturesToggle = $('test-features-toggle') as HTMLButtonElement;
-testFeaturesToggle.addEventListener('click', () => {
-  testFeaturesPanel.open = !testFeaturesPanel.open;
-  testFeaturesToggle.setAttribute('aria-expanded', String(testFeaturesPanel.open));
-  testFeaturesToggle.textContent = testFeaturesPanel.open ? 'Hide test features' : 'Test features';
-});
-
-$('connect-button').addEventListener('click', () => {
-  connectError.textContent = '';
-  if (envClientId.trim()) {
-    clientIdInput.value = envClientId.trim();
-    try { twitch.connect(envClientId); }
-    catch (error) { connectError.textContent = error instanceof Error ? error.message : 'Could not start Twitch authorization.'; connectDialog.showModal(); }
-  } else {
-    connectDialog.showModal();
-    clientIdInput.focus();
-  }
 });
 
 $('authorize-button').addEventListener('click', (event) => {
@@ -185,11 +238,28 @@ $('authorize-button').addEventListener('click', (event) => {
   catch (error) { connectError.textContent = error instanceof Error ? error.message : 'Could not start Twitch authorization.'; }
 });
 
-$('disconnect-button').addEventListener('click', () => twitch.disconnect());
-connectDialog.addEventListener('click', (event) => {
-  if (event.target === connectDialog) connectDialog.close();
+connectDialog.addEventListener('click', (event) => { if (event.target === connectDialog) connectDialog.close(); });
+$('ui-scale').addEventListener('input', () => {
+  settings.uiScale = Number(uiScaleInput.value);
+  applySettings();
 });
+$('ui-scale').addEventListener('change', saveSettings);
+reduceMotionInput.addEventListener('change', () => { settings.reducedMotion = reduceMotionInput.checked; saveSettings(); });
+screenShakeInput.addEventListener('change', () => { settings.screenShake = screenShakeInput.checked; saveSettings(); });
+$('fullscreen-button').addEventListener('click', () => {
+  const message = $('settings-message');
+  message.textContent = '';
+  try {
+    if (game.scale.isFullscreen) game.scale.stopFullscreen();
+    else game.scale.startFullscreen();
+  } catch {
+    message.textContent = 'Fullscreen is unavailable in this browser window.';
+  }
+});
+game.scale.on(Phaser.Scale.Events.FULLSCREEN_FAILED, () => { $('settings-message').textContent = 'Fullscreen was blocked by the browser. Try again from this page.'; });
+const updateFullscreenLabel = () => { $('fullscreen-button').textContent = game.scale.isFullscreen ? 'EXIT FULLSCREEN' : 'ENTER FULLSCREEN'; };
+game.scale.on(Phaser.Scale.Events.ENTER_FULLSCREEN, updateFullscreenLabel);
+game.scale.on(Phaser.Scale.Events.LEAVE_FULLSCREEN, updateFullscreenLabel);
 
 void twitch.completeOAuthIfPresent(envClientId);
-
 window.addEventListener('beforeunload', () => game.destroy(true));

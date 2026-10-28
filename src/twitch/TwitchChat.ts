@@ -1,3 +1,5 @@
+import { GAME_CONFIG } from '../core/config';
+
 export interface TwitchChatEvent {
   username: string;
   chatterId: string;
@@ -289,7 +291,7 @@ export class TwitchChat {
     }
     if (event.chatter_user_id) this.onChatter(event.chatter_user_id);
     const text = event.message?.text?.trim() ?? '';
-    if (!/^!b\d+\s+wire\b/i.test(text)) return;
+    if (!(/^(?:!b\d+\s+wire\b|!repair(?:\s|$))/i.test(text))) return;
     const now = Date.now();
     const chatterId = event.chatter_user_id;
     if (!chatterId) return;
@@ -298,7 +300,7 @@ export class TwitchChat {
       for (const [id, usedAt] of this.viewerCommandTimes) if (now - usedAt > 850) this.viewerCommandTimes.delete(id);
     }
     const previous = this.viewerCommandTimes.get(chatterId) ?? 0;
-    if (now - previous < 850) {
+    if (now - previous < GAME_CONFIG.CHAT_COMMAND_COOLDOWN_SECONDS * 1000) {
       this.notifyRateLimit(`@${username}: wait before placing another wire.`);
       return;
     }

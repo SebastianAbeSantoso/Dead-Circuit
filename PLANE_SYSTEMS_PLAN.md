@@ -2,9 +2,9 @@
 
 **Target:** Replace the DOM HUD + danger meter with a full-screen Phaser game that tracks a plane with 6 damageable parts. Round loss condition changes from "danger meter fills" to "all parts destroyed." Each damaged part degrades a specific gameplay variable.
 
-**Owner:** Codex (gameplay / core player-facing experience). Supporting engineer owns tests, config, integration glue, and assets.
+**Owner:** Codex (gameplay / core player-facing experience), with core Twitch command adapter retained.
 
-**Status:** Proposed design — assumptions marked, not locked. Codex tunes values and picks final part effects.
+**Status:** Implemented in the playable prototype on 2026-10-28. Remaining work is hands-on balance/stream-scale QA and live Twitch verification; this is not a vertical slice.
 
 ---
 
@@ -29,11 +29,11 @@ Six parts. Names and effects are suggestions; feel free to swap themes or effect
 | **Engine** | Ship speed × 0.85 | Ship speed × 0.7 | Ship speed × 0.5 |
 | **Hull** | Hit invulnerability 1.15s → 0.9s | Hit invulnerability → 0.6s | Hit invulnerability → 0.3s |
 | **Avionics** | Turn responsiveness × 0.8 | Turn responsiveness × 0.6 | Turn responsiveness × 0.4 |
-| **Fuel** | Danger drain × 1.25 | Danger drain × 1.5 | Danger drain × 2.0 |
+| **Fuel** | Danmaku cadence × 1.2 | Danmaku cadence × 1.45 | Danmaku cadence × 1.75 |
 | **Comms** | Chat command cooldown × 1.5 | Chat command cooldown × 2.0 | Chat command cooldown × 3.0 |
 | **Life Support** | Screen shake magnitude × 1.5 | Screen shake magnitude × 2.0 | Screen shake magnitude × 3.0 + vision vignette |
 
-**Assumption:** Effects are multiplicative on top of existing values in `multiGame.ts`/`GameScene.ts` and recomputed whenever a part's state changes. Codex decides exact numbers.
+Effects are multiplicative on top of existing values in `multiGame.ts` / `GameScene.ts` and recomputed as the part state changes. Fuel affects attack cadence because the danger meter was removed with the previous HUD.
 
 ---
 
@@ -49,10 +49,10 @@ On pilot impact (bullet hits ship):
 5. Emit an event so the in-canvas UI can show which part was hit and its new state (e.g. `PART_HIT: { partId, newLevel }`).
 
 **Repair (how a part gets better):**
-- Chat wires power to a part via existing `!bN wire` command targeting a "repair node" on that part's board, OR a dedicated repair command Codex adds.
-- Repairing decrements the part level by 1 (Damaged → Operational, Critical → Damaged, Destroyed → Critical).
+- A solved routing board awards one repair reserve (maximum three per run).
+- A viewer spends one reserve with `!repair <part>` (for example, `!repair engine`). Repair decrements one state (Damaged → Operational, Critical → Damaged, Destroyed → Critical).
 - **Key rule from user:** "if that part gets fixed, then it doesn't get worse" — meaning a fixed part cannot be re-damaged by the *same* hit event; normal random selection still applies on future hits.
-- Repair should require chat coordination (consistent with the game's pillars).
+- Repair is available to chat and local demo input, uses the same per-viewer cooldown as wire commands, and is applied through the shared bounded input queue.
 
 **Loss condition:**
 - All 6 parts at level 3 (Destroyed) → phase = 'lost'.
@@ -99,7 +99,7 @@ export function computePlaneMultipliers(state: GameState): {
   speedMult: number;
   invulnSeconds: number;
   turnMult: number;
-  dangerDrainMult: number;
+  attackRateMult: number;
   commandCooldownMult: number;
   shakeMult: number;
 };
@@ -108,7 +108,7 @@ export function isPlaneDestroyed(state: GameState): boolean;
 
 `GameScene.ts`:
 - Subscribes to `partHit` / `partRepaired` events and draws them inside the canvas (part status grid, damage flash on the part icon).
-- Reads `computePlaneMultipliers` each frame and applies to ship speed, turn rate, danger drain, command cooldown, shake.
+- Reads `computePlaneMultipliers` each frame and applies to ship speed, turn rate, danmaku cadence, command cooldown, and shake.
 
 **Rule:** If either of us changes these signatures, update both sides and this plan.
 
@@ -157,25 +157,25 @@ Codex owns `GameScene.ts` render. Supporting engineer owns CSS removal and confi
 3. **`src/main.ts`:** Remove DOM HUD wiring (`dangerValue`, `boardList`, `event-feed`, etc.). Keep Twitch adapter + demo input wiring. Wire `onEvent`/`onState` to Phaser text objects or a minimal Phaser UI layer.
 4. **`src/core/config.ts`:** Add plane part defaults (part names, damage escalation cooldown if any, repair command cost, base multipliers).
 
-**Assumption:** Full-screen means `window.innerWidth × window.innerHeight` with the canvas resizing on window resize; Phaser `Scale.RESIZE` mode. Codex confirms the exact scale mode.
+**Implementation:** Phaser `Scale.RESIZE` fills the window; a 1600 × 900 logical world is camera-fit and centered for the current wide-screen presentation.
 
 ---
 
 ## 6. Milestones (Codex leads, supporting engineer in parentheses)
 
-**M1 — Plane state machine in `multiGame.ts`** (Codex)
+**M1 — Plane state machine in `multiGame.ts` — implemented**
 - Add `PlaneState`, `damageRandomPart`, `repairPart`, `computePlaneMultipliers`, `isPlaneDestroyed`.
 - Unit tests by supporting engineer (vitest): random part selection, escalation chain 0→1→2→3, repair decrements, all-destroyed detection.
 
-**M2 — Wire damage into round loop** (Codex)
-- On pilot hit, call `damageRandomPart` instead of (or in addition to) flat danger.
-- Loss condition: `isPlaneDestroyed(state)` → phase = 'lost'.
-- Keep danger meter as a secondary pressure source or remove entirely (Codex decides).
+**M2 — Wire damage into round loop — implemented**
+- On pilot hit or live-wire short, call `damageRandomPart`.
+- Loss condition: all six parts destroyed → phase = 'lost'.
+- Remove the danger meter; Fuel damage increases attack cadence.
 
-**M3 — Part effects applied each frame** (Codex)
-- Apply `computePlaneMultipliers` to ship speed, turn, danger drain, command cooldown, shake.
+**M3 — Part effects applied each frame — implemented**
+- Apply `computePlaneMultipliers` to ship speed, turn, danmaku cadence, command cooldown, and shake.
 
-**M4 — In-canvas part UI** (Codex)
+**M4 — In-canvas part UI — implemented**
 - Draw 6 part status icons inside the game canvas with color by damage level.
 - Flash the hit part on impact; show repaired state change.
 
@@ -189,12 +189,12 @@ Codex owns `GameScene.ts` render. Supporting engineer owns CSS removal and confi
 - Part state transition is interruptible (hit during repair cancels cleanly, apple-design P3).
 - `impeccable harden` edge cases pass: hit on already-destroyed part, rapid repair/redamage, window resize, rapid sequential hits.
 
-**M5 — Full-screen + DOM removal** (Codex + supporting engineer)
+**M5 — Full-screen + DOM removal — implemented**
 - Canvas fills window; remove gameplay DOM HUD; keep connect dialog + demo input.
 - Resize handler for window changes.
 
-**M6 — Balance pass** (Codex, with supporting engineer config exposure)
-- Tune part effects, damage frequency, repair cost so a round is winnable but tense.
+**M6 — Balance pass — pending playthroughs**
+- Tune part effects, damage frequency, and repair cost after Standard and AND-gate runs are played at stream size.
 
 ---
 
@@ -208,18 +208,33 @@ Codex owns `GameScene.ts` render. Supporting engineer owns CSS removal and confi
 
 ---
 
-## 8. Assumptions vs verified facts
+## 9. Implemented MVP decisions and verification
+
+- Gameplay is rendered in a full-window Phaser canvas using a 1600 × 900 logical layout and `Scale.RESIZE`; contents fit and center to the viewport. Only the Twitch authorization dialog and local command entry remain in the DOM.
+- Six aircraft systems have four states, colored status cards, hit/repair feedback, and reduced-motion support. Destruction of all six is the only system-damage loss condition.
+- Engine, Hull, Avionics, Fuel, Comms, and Life Support respectively affect speed, hit invulnerability, steering response, projectile cadence, chat command cooldown, and hit shake. Destroyed Life Support also adds a red edge vignette.
+- Pilot hits and live-wire shorts damage a random part. A hit can also add a routing board according to existing cooldown/capacity rules. All boards online plus reaching the exit still wins.
+- Each board can award at most one reserve on its first solve; the run holds at most three. Both `!bN wire ...` and `!repair <part>` enter the same ordered gameplay queue from Twitch or demo input.
+- The previous Fuel danger-drain proposal is superseded: no danger meter remains, and Fuel damage increases danmaku cadence.
+- Verification on 2026-10-28: production build passes; browser visual review confirms first-load mission selection and the full-screen HUD. The Impeccable automated detector could not run because its engine download was unavailable in this network-restricted environment. Live Twitch auth/chat has not been verified in this turn.
+
+## 10. Remaining QA
+
+- Play one complete Standard and one AND-gate run; verify repairs, wire replacement shorts, hit-created boards, all-systems loss, and extraction.
+- Review at stream scale and tune damage/repair balance; verify reduced motion and responsive resize.
+- Run live Twitch auth and command smoke when the app Client ID/channel are configured. Do not add the vertical-slice content before this MVP is reliable.
+
+## 11. Assumptions vs verified facts
 
 **Verified:**
 - `multiGame.ts` is pure TS and testable without Phaser/Twitch.
 - `config.ts` already centralizes tuning constants; new plane constants can go there.
 - Build passes (`tsc --noEmit && vite build`).
 
-**Assumptions (Codex to confirm or correct):**
-- 6 parts is the right count; user said "like six parts."
-- Repair happens through chat wire commands (keeps the "chat routes power" pillar) rather than a separate pilot button.
-- Danger meter can be removed or kept as a background pressure; Codex decides.
-- Full-screen canvas with `Scale.RESIZE` is acceptable.
-- Part effects are multiplicative and recomputed on state change.
+**Decisions now implemented:**
+- Six parts are retained. Repair uses the dedicated `!repair <part>` command paid for by a solved board.
+- The danger meter is removed; Fuel controls attack cadence.
+- The canvas uses `Scale.RESIZE`, while the fixed logical layout is camera-fit into the available browser dimensions.
+- Multipliers derive directly from current part state in the pure TypeScript core.
 
 Flag anything that looks wrong early; this plan is adaptable.

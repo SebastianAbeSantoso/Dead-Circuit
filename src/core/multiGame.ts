@@ -5,11 +5,29 @@ import {
 } from './game';
 
 export type RoundPhase = 'ready' | 'playing' | 'won' | 'lost';
+export type PartId = 'engine' | 'hull' | 'avionics' | 'fuel' | 'comms' | 'life_support';
+export type PartLevel = 0 | 1 | 2 | 3;
+export interface PlanePart { id: PartId; level: PartLevel }
+export interface PlaneState { parts: Map<PartId, PlanePart>; destroyedCount: number; repairCredits: number }
+export interface PartStateEvent {
+  type: 'hit' | 'repaired';
+  partId: PartId;
+  previousLevel: PartLevel;
+  newLevel: PartLevel;
+}
+export interface PlaneMultipliers {
+  speedMult: number;
+  invulnSeconds: number;
+  turnMult: number;
+  attackRateMult: number;
+  commandCooldownMult: number;
+  shakeMult: number;
+}
 export interface Projectile {
   x: number; y: number; previousX: number; previousY: number;
   velocityX: number; velocityY: number; radius: number; color: number; diamond: boolean;
 }
-export const FLIGHT_ARENA = { x: 630, y: 140, width: 570, height: 570 } as const;
+export const FLIGHT_ARENA = { x: 808, y: 108, width: 760, height: 760 } as const;
 export interface CircuitBoard {
   id: number;
   levelId: LevelId;
@@ -22,6 +40,7 @@ export interface CircuitBoard {
   shortCell: string | null;
   shortFlashTimer: number;
   solved: boolean;
+  repairAwarded: boolean;
   placementCount: number;
   lastActivityAt: number | null;
   createdBy: 'start' | 'chat growth' | 'pilot hit';
@@ -39,18 +58,29 @@ export interface GameState {
   boardSpawnTimer: number;
   chatterPruneTimer: number;
   hitBoardCooldown: number;
-  danger: number;
+  plane: PlaneState;
+  commandCooldowns: Map<string, number>;
+  partEvents: PartStateEvent[];
   shipX: number;
   shipY: number;
+  shipVelocityX: number;
+  shipVelocityY: number;
   shipAngle: number;
   bullets: Projectile[];
   nextPatternIn: number;
   patternIndex: number;
+  lastPattern: number;
   hitCooldown: number;
   elapsed: number;
   lastEvent: string;
 }
-export interface ParsedWireCommand extends Cell { boardId: number; kind: TileKind; label: string }
+export interface ParsedWireCommand extends Cell { boardId: number; kind: TileKind; label: string; actorId: string }
+
+export const PART_IDS: PartId[] = ['engine', 'hull', 'avionics', 'fuel', 'comms', 'life_support'];
+export const PART_LABELS: Record<PartId, string> = {
+  engine: 'ENGINE', hull: 'HULL', avionics: 'AVIONICS', fuel: 'FUEL', comms: 'COMMS', life_support: 'LIFE SUPPORT',
+};
+const PART_LEVEL_NAMES = ['OPERATIONAL', 'DAMAGED', 'CRITICAL', 'DESTROYED'] as const;
 
 export const CHATTER_WINDOW_MS = config.CHATTER_WINDOW_MS;
 export const CHATTERS_PER_BOARD = config.CHATTERS_PER_BOARD;
@@ -72,9 +102,12 @@ export function createInitialState(levelId: LevelId = 'standard', seed = randomS
   const state: GameState = {
     levelId, phase: 'ready', boards: [], activeChatters: new Map(), activeChatterCount: 0,
     boardCapacity: 2, desiredBoardCount: 1, nextBoardId: 1, runSeed: seed >>> 0,
-    boardSpawnTimer: 0, chatterPruneTimer: 1, hitBoardCooldown: 0, danger: 0,
+    boardSpawnTimer: 0, chatterPruneTimer: 1, hitBoardCooldown: 0,
+    plane: { parts: new Map(PART_IDS.map((id) => [id, { id, level: 0 as PartLevel }])), destroyedCount: 0, repairCredits: 0 },
+    commandCooldowns: new Map(), partEvents: [],
     shipX: FLIGHT_ARENA.x + FLIGHT_ARENA.width / 2, shipY: FLIGHT_ARENA.y + FLIGHT_ARENA.height - 42, shipAngle: -Math.PI / 2,
-    bullets: [],    nextPatternIn: config.PATTERN_INITIAL_DELAY_SECONDS, patternIndex: 0, hitCooldown: 0, elapsed: 0,
+    shipVelocityX: 0, shipVelocityY: 0,
+    bullets: [], nextPatternIn: config.PATTERN_INITIAL_DELAY_SECONDS, patternIndex: 0, lastPattern: -1, hitCooldown: 0, elapsed: 0,
     lastEvent: 'Pilot ready. Chat can route the drive.',
   };
   addBoard(state, 'start');
@@ -112,7 +145,10 @@ function keyFor(cell: Cell): string { return cellKey(cell.column, cell.row); }
 interface SearchNode extends Cell { incoming: Direction | null; cost: number; estimate: number; path: Cell[] }
 
 /** Seeded A*: tie-cost variation makes obstacle layouts produce repeatable route variety. */
-function findPath(start: Cell, goal: Cell, blocked: Cell[], forbidden: Cell[], seed: number): Cell[] | null {
+function findPath(
+  start: Cell, goal: Cell, blocked: Cell[], forbidden: Cell[], seed: number,
+  firstDirection?: Direction, arrivalDirection?: Direction,
+): Cell[] | null {
   const random = seededRandom(seed);
   const open: SearchNode[] = [{ ...start, incoming: null, cost: 0, estimate: manhattan(start, goal), path: [{ ...start }] }];
   const best = new Map<string, number>();
@@ -121,8 +157,9 @@ function findPath(start: Cell, goal: Cell, blocked: Cell[], forbidden: Cell[], s
     let bestIndex = 0;
     for (let i = 1; i < open.length; i++) if (open[i].estimate < open[bestIndex].estimate) bestIndex = i;
     const [current] = open.splice(bestIndex, 1);
-    if (isSame(current, goal)) return current.path;
+    if (isSame(current, goal) && (!arrivalDirection || current.incoming === arrivalDirection)) return current.path;
     for (const direction of DIRECTIONS) {
+      if (current.incoming === null && firstDirection && direction !== firstDirection) continue;
       const [dx, dy] = STEP[direction];
       const next = { column: current.column + dx, row: current.row + dy };
       if (next.column < 0 || next.row < 0 || next.column >= BOARD_SIZE.columns || next.row >= BOARD_SIZE.rows) continue;
@@ -140,6 +177,17 @@ function findPath(start: Cell, goal: Cell, blocked: Cell[], forbidden: Cell[], s
 }
 
 function manhattan(a: Cell, b: Cell): number { return Math.abs(a.column - b.column) + Math.abs(a.row - b.row); }
+
+function countTurns(path: Cell[]): number {
+  let turns = 0;
+  let previous: Direction | null = null;
+  for (let index = 1; index < path.length; index++) {
+    const direction = directionBetween(path[index - 1], path[index]);
+    if (previous && previous !== direction) turns++;
+    previous = direction;
+  }
+  return turns;
+}
 
 function tilesForPath(path: Cell[], owner = 'ROUTE CHECK'): Map<string, WireTile> {
   const tiles = new Map<string, WireTile>();
@@ -161,52 +209,134 @@ function directionBetween(from: Cell, to: Cell): Direction {
   return to.row > from.row ? 'S' : 'N';
 }
 
-function generateLevel(levelId: LevelId, seed: number): LevelDefinition {
-  const level = copyLevel(levelId);
+/** Generate a deterministic candidate and prove it with the same signal rules used during play. */
+export function generateLevelForSeed(levelId: LevelId, seed: number): LevelDefinition {
   const random = seededRandom(seed);
-  if (levelId === 'standard') {
-    const obstacle = { column: 2 + Math.floor(random() * 3), row: 2 };
-    let route = findPath(level.sources[0], level.target, [obstacle], [], seed);
-    if (!route) route = findPath(level.sources[0], level.target, [], [], seed);
-    if (!route) return level;
-    level.blocked = [obstacle];
-    const onRoute = new Set(route.map(keyFor));
-    const candidates: Cell[] = [];
-    for (let row = 0; row < level.rows; row++) for (let column = 1; column < level.columns - 1; column++) {
-      const cell = { column, row };
-      if (!onRoute.has(keyFor(cell)) && !isSame(cell, obstacle)) candidates.push(cell);
+  const fallback = copyLevel(levelId);
+  for (let attempt = 0; attempt < 96; attempt++) {
+    const candidate = copyLevel(levelId);
+    candidate.sources = candidate.sources.map((source) => ({
+      ...source,
+      column: Math.floor(random() * 3),
+      row: Math.floor(random() * candidate.rows),
+    }));
+    candidate.target = { column: 4 + Math.floor(random() * 3), row: Math.floor(random() * candidate.rows) };
+    if (candidate.sources.some((source) => isSame(source, candidate.target))) continue;
+    const cells = [...candidate.sources, candidate.target];
+    if (cells.some((cell, index) => cells.slice(index + 1).some((other) => isSame(cell, other)))) continue;
+
+    if (levelId === 'standard') {
+      const source = candidate.sources[0];
+      const hull = { column: 2 + Math.floor(random() * 3), row: Math.floor(random() * candidate.rows) };
+      if (cells.some((cell) => isSame(cell, hull))) continue;
+      const route = findPath(source, candidate.target, [hull], [], seed ^ Math.imul(attempt + 1, 0x45d9f3b), source.output, 'E');
+      if (!route || route.length < Math.min(5, manhattan(source, candidate.target) + 3) || route.length > 13 || countTurns(route) > 4) continue;
+      candidate.blocked = [hull];
+      const reserved = new Set(route.map(keyFor));
+      const obstacles = freeCells(candidate).filter((cell) => !reserved.has(keyFor(cell)) && !cells.some((special) => isSame(special, cell)));
+      shuffle(obstacles, random);
+      const optionalCount = Math.floor(random() * 3);
+      for (const cell of obstacles) {
+        if (candidate.blocked.length >= optionalCount + 1) break;
+        if (candidate.blocked.some((other) => manhattan(cell, other) < 2) || cells.some((special) => manhattan(cell, special) < 2)) continue;
+        candidate.blocked.push(cell);
+      }
+      const verificationRoute = findPath(source, candidate.target, candidate.blocked, [], seed ^ 0xa511e9b3, source.output, 'E');
+      if (!verificationRoute || !calculatePower(tilesForPath(verificationRoute), candidate).powered.has('TARGET')) continue;
+      candidate.description = `Route CORE to DRIVE around hull damage (${labelCell(hull.column, hull.row)}).`;
+      return candidate;
     }
-    shuffle(candidates, random);
-    for (const cell of candidates.slice(0, Math.floor(random() * 3))) level.blocked.push(cell);
-    const verifiedPath = findPath(level.sources[0], level.target, level.blocked, [], seed ^ 0xa511e9b3);
-    if (!verifiedPath || !calculatePower(tilesForPath(verifiedPath), level).powered.has('TARGET')) level.blocked = [obstacle];
-    level.description = `Route CORE to DRIVE around randomized hull damage (${labelCell(obstacle.column, obstacle.row)}).`;
-    return level;
+
+    const gateColumn = 2 + Math.floor(random() * 3);
+    const gateRow = Math.floor(random() * candidate.rows);
+    candidate.gate = { column: gateColumn, row: gateRow, output: 'E', inputs: [] };
+    if ([...candidate.sources, candidate.target].some((cell) => isSame(cell, candidate.gate!))) continue;
+    const inputSideOptions: Direction[] = ['W', 'N', 'S'];
+    shuffle(inputSideOptions, random);
+    const inputSides = inputSideOptions.slice(0, 2);
+    candidate.gate.inputs = inputSides.map((side, index) => {
+      const [dx, dy] = STEP[side];
+      return { id: index === 0 ? 'A' : 'B', side, neighbor: { column: gateColumn + dx, row: gateRow + dy } };
+    });
+    const usedGateSides = new Set(inputSides);
+    const outputOptions = DIRECTIONS.filter((side) => !usedGateSides.has(side));
+    candidate.gate.output = outputOptions[Math.floor(random() * outputOptions.length)];
+    if (candidate.gate.output !== 'E' && random() < 0.7) candidate.gate.output = 'E';
+    if (candidate.gate.output === 'E' && inputSides.includes('E')) continue;
+    const allSpecial = [...candidate.sources, candidate.target, candidate.gate];
+    if (allSpecial.some((cell, index) => allSpecial.slice(index + 1).some((other) => isSame(cell, other)))) continue;
+    if (candidate.gate.inputs.some((input) => input.neighbor.column < 0 || input.neighbor.row < 0 || input.neighbor.column >= candidate.columns || input.neighbor.row >= candidate.rows)) continue;
+
+    let reserved = new Set<string>();
+    const routeTiles = new Map<string, WireTile>();
+    let valid = true;
+    for (let index = 0; index < candidate.sources.length; index++) {
+      const source = candidate.sources[index];
+      const input = candidate.gate.inputs.find((entry) => entry.id === source.gateInput);
+      if (!input) { valid = false; break; }
+      const forbidden = [...reserved].map((key) => {
+        const [column, row] = key.split(',').map(Number);
+        return { column, row };
+      }).concat(candidate.sources.filter((other) => other !== source), [candidate.target]);
+      const arrival = OPPOSITE[input.side];
+      const route = findPath(source, candidate.gate, [], forbidden, seed ^ Math.imul(attempt + index + 1, 0x27d4eb2d), source.output, arrival);
+      if (!route || route.length < 3 || route.length > 13 || countTurns(route) > 4) { valid = false; break; }
+      route.forEach((cell) => reserved.add(keyFor(cell)));
+      for (const [key, tile] of tilesForPath(route).entries()) {
+        if (routeTiles.has(key)) { valid = false; break; }
+        routeTiles.set(key, tile);
+      }
+    }
+    if (!valid) continue;
+    const forbiddenOutput = [...reserved].map((key) => {
+      const [column, row] = key.split(',').map(Number);
+      return { column, row };
+    }).concat(candidate.sources, [candidate.target]);
+    const outputRoute = findPath(candidate.gate, candidate.target, [], forbiddenOutput, seed ^ 0x68bc21eb, candidate.gate.output, 'E');
+    if (!outputRoute || outputRoute.length < 3 || outputRoute.length > 13 || countTurns(outputRoute) > 4) continue;
+    for (const [key, tile] of tilesForPath(outputRoute).entries()) {
+      if (routeTiles.has(key)) { valid = false; break; }
+      routeTiles.set(key, tile);
+      reserved.add(key);
+    }
+    if (!valid) continue;
+    if (!calculatePower(routeTiles, candidate).powered.has('TARGET')) continue;
+    const obstacles = freeCells(candidate).filter((cell) => !reserved.has(keyFor(cell)) && !allSpecial.some((special) => isSame(special, cell)));
+    shuffle(obstacles, random);
+    const optionalCount = Math.floor(random() * 3);
+    candidate.blocked = [];
+    for (const cell of obstacles) {
+      if (candidate.blocked.length >= optionalCount) break;
+      if (candidate.blocked.some((other) => manhattan(cell, other) < 2) || allSpecial.some((special) => manhattan(cell, special) < 2)) continue;
+      candidate.blocked.push(cell);
+    }
+    if (!calculatePower(routeTiles, candidate).powered.has('TARGET')) continue;
+    candidate.description = 'Power both AND inputs through hull damage, then reach the drive.';
+    return candidate;
   }
 
-  const fixedRoute = ['1,1', '2,1', '2,2', '1,3', '2,3', '3,3', '4,2', '5,2'];
-  const fixedCells = new Set(fixedRoute);
-  const special = [...level.sources, level.target, ...(level.gate ? [level.gate] : [])];
-  const candidates: Cell[] = [];
-  for (let row = 0; row < level.rows; row++) for (let column = 0; column < level.columns; column++) {
-    const cell = { column, row };
-    if (!fixedCells.has(keyFor(cell)) && !special.some((fixed) => isSame(fixed, cell))) candidates.push(cell);
+  // Defensive fallback stays deterministic and is itself checked before use.
+  if (levelId === 'standard') {
+    const route = findPath(fallback.sources[0], fallback.target, fallback.blocked, [], seed, fallback.sources[0].output, 'E');
+    if (route && calculatePower(tilesForPath(route), fallback).powered.has('TARGET')) return fallback;
+  } else {
+    fallback.blocked = [];
+    const routes = [
+      [{ column: 0, row: 1 }, { column: 1, row: 1 }, { column: 2, row: 1 }, { column: 2, row: 2 }, { column: 3, row: 2 }],
+      [{ column: 0, row: 3 }, { column: 1, row: 3 }, { column: 2, row: 3 }, { column: 3, row: 3 }, { column: 3, row: 2 }],
+      [{ column: 3, row: 2 }, { column: 4, row: 2 }, { column: 5, row: 2 }, { column: 6, row: 2 }],
+    ];
+    const routeTiles = new Map<string, WireTile>();
+    for (const route of routes) for (const [key, tile] of tilesForPath(route).entries()) routeTiles.set(key, tile);
+    if (calculatePower(routeTiles, fallback).powered.has('TARGET')) return fallback;
   }
-  shuffle(candidates, random);
-  level.blocked = candidates.slice(0, 1 + Math.floor(random() * 3));
-  const routeTiles = new Map<string, WireTile>([
-    [cellKey(1, 1), { kind: 'H', owner: 'ROUTE CHECK' }],
-    [cellKey(2, 1), { kind: 'ES', owner: 'ROUTE CHECK' }],
-    [cellKey(2, 2), { kind: 'NE', owner: 'ROUTE CHECK' }],
-    [cellKey(1, 3), { kind: 'H', owner: 'ROUTE CHECK' }],
-    [cellKey(2, 3), { kind: 'H', owner: 'ROUTE CHECK' }],
-    [cellKey(3, 3), { kind: 'WN', owner: 'ROUTE CHECK' }],
-    [cellKey(4, 2), { kind: 'H', owner: 'ROUTE CHECK' }],
-    [cellKey(5, 2), { kind: 'H', owner: 'ROUTE CHECK' }],
-  ]);
-  if (!calculatePower(routeTiles, level).powered.has('TARGET')) level.blocked = [];
-  level.description = 'Power both AND inputs through randomized hull damage, then reach the drive.';
-  return level;
+  throw new Error(`Unable to create a valid ${levelId} layout for seed ${seed}.`);
+}
+
+function freeCells(level: LevelDefinition): Cell[] {
+  const cells: Cell[] = [];
+  for (let row = 0; row < level.rows; row++) for (let column = 0; column < level.columns; column++) cells.push({ column, row });
+  return cells;
 }
 
 function shuffle<T>(items: T[], random: () => number): void {
@@ -220,9 +350,9 @@ function addBoard(state: GameState, createdBy: CircuitBoard['createdBy']): Circu
   const id = state.nextBoardId++;
   const seed = mixSeed(state.runSeed, id);
   const board: CircuitBoard = {
-    id, levelId: state.levelId, seed, level: generateLevel(state.levelId, seed),
+    id, levelId: state.levelId, seed, level: generateLevelForSeed(state.levelId, seed),
     tiles: new Map(), powered: new Set(), gateInputs: new Set(), shorts: 0,
-    shortCell: null, shortFlashTimer: 0, solved: false, placementCount: 0, lastActivityAt: null, createdBy,
+    shortCell: null, shortFlashTimer: 0, solved: false, repairAwarded: false, placementCount: 0, lastActivityAt: null, createdBy,
   };
   state.boards.push(board);
   state.lastEvent = `BOARD B${id} online — ${LEVELS[state.levelId].title} relay opened (${createdBy}).`;
@@ -251,7 +381,7 @@ export function pruneActiveChatters(state: GameState, now = Date.now()): void {
   updateBoardScaling(state);
 }
 
-export function parseWireCommand(input: string, owner: string): ParsedWireCommand | string {
+export function parseWireCommand(input: string, owner: string, actorId = owner): ParsedWireCommand | string {
   const match = input.trim().match(/^!b(\d+)\s+wire\s+([A-Ga-g][1-5])\s+(UP|DOWN|LEFT|RIGHT)\s+(UP|DOWN|LEFT|RIGHT)$/i);
   if (!match) return 'Use !b1 wire B3 LEFT RIGHT. Choose two different sides: UP, DOWN, LEFT, RIGHT.';
   const boardId = Number(match[1]);
@@ -262,7 +392,17 @@ export function parseWireCommand(input: string, owner: string): ParsedWireComman
   const second = directionToken(match[4]);
   if (first === second) return 'A wire needs two different sides. Try !b1 wire B3 LEFT RIGHT.';
   const kind = PORT_TILE[[first, second].sort().join('')];
-  return { boardId, column, row, kind, label: owner };
+  return { boardId, column, row, kind, label: owner, actorId };
+}
+
+export function parseRepairCommand(input: string): PartId | string | null {
+  const trimmed = input.trim();
+  if (!/^!repair(?:\s|$)/i.test(trimmed)) return null;
+  const match = trimmed.match(/^!repair\s+([a-z_ -]+)$/i);
+  if (!match) return 'Use !repair engine. A solved board earns one repair reserve.';
+  const partId = match[1].toLowerCase().replace(/[ -]+/g, '_') as PartId;
+  if (!PART_IDS.includes(partId)) return 'Unknown part. Repair: engine, hull, avionics, fuel, comms, or life support.';
+  return partId;
 }
 
 function directionToken(input: string): Direction {
@@ -289,13 +429,14 @@ export function placeWire(state: GameState, command: ParsedWireCommand): { accep
   const key = cellKey(command.column, command.row);
   if (command.column < 0 || command.row < 0 || command.column >= level.columns || command.row >= level.rows) return { accepted: false, message: 'That cell is outside the board.', short: false, replaced: false };
   if (isFixedCell(level, command)) return { accepted: false, message: `${labelCell(command.column, command.row)} on B${board.id} is a fixed mission cell.`, short: false, replaced: false };
+  const cooldownMessage = consumeCommandCooldown(state, command.actorId, command.label);
+  if (cooldownMessage) return { accepted: false, message: cooldownMessage, short: false, replaced: false };
   const previous = board.tiles.get(key);
   const replaced = Boolean(previous);
   const causedShort = replaced && board.powered.has(key);
   const wasSolved = board.solved;
   if (causedShort) {
     board.shorts += 1;
-    state.danger = Math.min(config.DANGER_MAX, state.danger + config.DANGER_SHORT_PENALTY);
     board.shortCell = key;
     board.shortFlashTimer = config.BOARD_SHORT_FLASH_SECONDS;
   }
@@ -308,16 +449,101 @@ export function placeWire(state: GameState, command: ParsedWireCommand): { accep
   board.solved = result.powered.has('TARGET');
   if (causedShort) state.lastEvent = `SHORT on B${board.id} at ${labelCell(command.column, command.row)} — ${describePorts(command.kind)} replaced ${describePorts(previous!.kind)}; live wire hit!`;
   else if (!wasSolved && board.solved) {
-    state.danger = Math.max(0, state.danger - config.DANGER_SOLVE_REDUCTION);
-    state.lastEvent = `BOARD B${board.id} ONLINE — circuit stabilized.`;
+    if (!board.repairAwarded && state.plane.repairCredits < config.MAX_REPAIR_CREDITS) state.plane.repairCredits += 1;
+    board.repairAwarded = true;
+    state.lastEvent = `BOARD B${board.id} ONLINE — repair reserve ${state.plane.repairCredits}/${config.MAX_REPAIR_CREDITS}.`;
   } else if (replaced) state.lastEvent = `B${board.id}: ${command.label} replaced ${describePorts(previous!.kind)} with ${describePorts(command.kind)} at ${labelCell(command.column, command.row)}.`;
   else state.lastEvent = `B${board.id}: ${command.label} placed a ${describePorts(command.kind)} wire at ${labelCell(command.column, command.row)}.`;
+  if (causedShort) {
+    const shortMessage = state.lastEvent;
+    const impact = damageRandomPart(state);
+    if (impact) {
+      state.lastEvent = isPlaneDestroyed(state)
+        ? `${shortMessage} ${state.lastEvent}`
+        : `${shortMessage} IMPACT — ${PART_LABELS[impact.partId]} ${PART_LEVEL_NAMES[impact.newLevel]}.`;
+    }
+  }
   return { accepted: true, message: state.lastEvent, short: causedShort, replaced };
+}
+
+export function damageRandomPart(state: GameState): PartStateEvent | null {
+  const partId = PART_IDS[Math.floor(Math.random() * PART_IDS.length)];
+  const part = state.plane.parts.get(partId);
+  if (!part || part.level >= 3) return null;
+  const previousLevel = part.level;
+  part.level = (part.level + 1) as PartLevel;
+  state.plane.destroyedCount = PART_IDS.filter((id) => state.plane.parts.get(id)?.level === 3).length;
+  const event: PartStateEvent = { type: 'hit', partId, previousLevel, newLevel: part.level };
+  state.partEvents.push(event);
+  state.lastEvent = `IMPACT — ${PART_LABELS[partId]} ${PART_LEVEL_NAMES[part.level]}.`;
+  if (isPlaneDestroyed(state)) {
+    state.phase = 'lost';
+    state.lastEvent = 'TOTAL SYSTEM FAILURE — all six aircraft systems are destroyed.';
+  }
+  return event;
+}
+
+export function repairPart(state: GameState, partId: PartId, actorId = 'CHAT', displayName = actorId): PartStateEvent | null {
+  const part = state.plane.parts.get(partId);
+  if (state.phase !== 'playing') {
+    state.lastEvent = 'Start a run before repairing aircraft systems.';
+    return null;
+  }
+  if (!part || part.level === 0) {
+    state.lastEvent = `${PART_LABELS[partId]} is already operational.`;
+    return null;
+  }
+  if (state.plane.repairCredits <= 0) {
+    state.lastEvent = 'No repair reserve. Power a routing board to earn one.';
+    return null;
+  }
+  const cooldownMessage = consumeCommandCooldown(state, actorId, displayName);
+  if (cooldownMessage) {
+    state.lastEvent = cooldownMessage;
+    return null;
+  }
+  const previousLevel = part.level;
+  part.level = (part.level - 1) as PartLevel;
+  state.plane.repairCredits -= 1;
+  state.plane.destroyedCount = PART_IDS.filter((id) => state.plane.parts.get(id)?.level === 3).length;
+  const event: PartStateEvent = { type: 'repaired', partId, previousLevel, newLevel: part.level };
+  state.partEvents.push(event);
+  state.lastEvent = `REPAIR — ${PART_LABELS[partId]} restored to ${PART_LEVEL_NAMES[part.level]}.`;
+  return event;
+}
+
+export function computePlaneMultipliers(state: GameState): PlaneMultipliers {
+  const levelFor = (partId: PartId) => state.plane.parts.get(partId)?.level ?? 0;
+  const at = (values: readonly number[], partId: PartId) => values[levelFor(partId)] ?? values[0];
+  return {
+    speedMult: at(config.PLANE_ENGINE_SPEED_MULTIPLIERS, 'engine'),
+    invulnSeconds: at(config.PLANE_HULL_INVULN_SECONDS, 'hull'),
+    turnMult: at(config.PLANE_AVIONICS_TURN_MULTIPLIERS, 'avionics'),
+    attackRateMult: at(config.PLANE_FUEL_ATTACK_RATE_MULTIPLIERS, 'fuel'),
+    commandCooldownMult: at(config.PLANE_COMMS_COMMAND_COOLDOWN_MULTIPLIERS, 'comms'),
+    shakeMult: at(config.PLANE_LIFE_SUPPORT_SHAKE_MULTIPLIERS, 'life_support'),
+  };
+}
+
+export function isPlaneDestroyed(state: GameState): boolean {
+  return state.plane.destroyedCount >= PART_IDS.length;
+}
+
+function consumeCommandCooldown(state: GameState, actorId: string, displayName = actorId): string | null {
+  const multipliers = computePlaneMultipliers(state);
+  const lastCommandAt = state.commandCooldowns.get(actorId);
+  const required = config.CHAT_COMMAND_COOLDOWN_SECONDS * multipliers.commandCooldownMult;
+  if (lastCommandAt !== undefined && state.elapsed - lastCommandAt < required) {
+    const wait = Math.max(1, Math.ceil(required - (state.elapsed - lastCommandAt)));
+    return `COMMS DAMAGED — @${displayName} wait ${wait}s before the next command.`;
+  }
+  state.commandCooldowns.set(actorId, state.elapsed);
+  return null;
 }
 
 export function beginRound(state: GameState): void {
   state.phase = 'playing';
-  state.lastEvent = `B1 ${LEVELS[state.levelId].title} active. Route the circuit, then escape.`;
+  state.lastEvent = 'SORTIE ACTIVE';
 }
 
 export function simulatePilotHit(state: GameState): void {
@@ -345,18 +571,23 @@ export function updateRound(state: GameState, deltaSeconds: number, movement: { 
     state.boardSpawnTimer = BOARD_SPAWN_INTERVAL;
   }
 
-  let allBoardsOnline = state.boards.length > 0 && state.boards.every((board) => board.solved);
-  state.danger = Math.min(config.DANGER_MAX, state.danger + dt * (allBoardsOnline ? config.DANGER_DRAIN_PER_SECOND_ONLINE : config.DANGER_DRAIN_PER_SECOND));
-  const speed = allBoardsOnline ? config.SHIP_SPEED_ONLINE : config.SHIP_SPEED;
-  state.shipX = clamp(state.shipX + movement.x * speed * dt, FLIGHT_ARENA.x + 18, FLIGHT_ARENA.x + FLIGHT_ARENA.width - 18);
-  state.shipY = clamp(state.shipY + movement.y * speed * dt, FLIGHT_ARENA.y + 18, FLIGHT_ARENA.y + FLIGHT_ARENA.height - 18);
-  if (movement.x !== 0 || movement.y !== 0) state.shipAngle = Math.atan2(movement.y, movement.x);
+  const allBoardsOnline = state.boards.length > 0 && state.boards.every((board) => board.solved);
+  const multipliers = computePlaneMultipliers(state);
+  const speed = (allBoardsOnline ? config.SHIP_SPEED_ONLINE : config.SHIP_SPEED) * multipliers.speedMult;
+  const steer = 1 - Math.exp(-config.SHIP_STEERING_RATE * multipliers.turnMult * dt);
+  state.shipVelocityX += (movement.x * speed - state.shipVelocityX) * steer;
+  state.shipVelocityY += (movement.y * speed - state.shipVelocityY) * steer;
+  state.shipX = clamp(state.shipX + state.shipVelocityX * dt, FLIGHT_ARENA.x + 18, FLIGHT_ARENA.x + FLIGHT_ARENA.width - 18);
+  state.shipY = clamp(state.shipY + state.shipVelocityY * dt, FLIGHT_ARENA.y + 18, FLIGHT_ARENA.y + FLIGHT_ARENA.height - 18);
+  if (state.shipX === FLIGHT_ARENA.x + 18 || state.shipX === FLIGHT_ARENA.x + FLIGHT_ARENA.width - 18) state.shipVelocityX = 0;
+  if (state.shipY === FLIGHT_ARENA.y + 18 || state.shipY === FLIGHT_ARENA.y + FLIGHT_ARENA.height - 18) state.shipVelocityY = 0;
+  if (Math.hypot(state.shipVelocityX, state.shipVelocityY) > 12) state.shipAngle = Math.atan2(state.shipVelocityY, state.shipVelocityX);
 
   state.nextPatternIn -= dt;
   if (state.nextPatternIn <= 0) {
     spawnDanmakuPattern(state);
     const difficulty = Math.min(config.PATTERN_MAX_DIFFICULTY, Math.floor(state.elapsed / config.PATTERN_DIFFICULTY_TIER_SECONDS));
-    state.nextPatternIn += Math.max(config.PATTERN_MIN_INTERVAL_SECONDS, config.PATTERN_BASE_INTERVAL_SECONDS - difficulty * config.PATTERN_DIFFICULTY_SPEEDUP_SECONDS);
+    state.nextPatternIn += Math.max(config.PATTERN_MIN_INTERVAL_SECONDS, config.PATTERN_BASE_INTERVAL_SECONDS - difficulty * config.PATTERN_DIFFICULTY_SPEEDUP_SECONDS) / multipliers.attackRateMult;
   }
   for (const bullet of state.bullets) {
     bullet.previousX = bullet.x;
@@ -374,12 +605,11 @@ export function updateRound(state: GameState, deltaSeconds: number, movement: { 
       const hitBullet = state.bullets[hitIndex];
       state.bullets = state.bullets.filter((bullet) => bullet !== hitBullet && Math.hypot(bullet.x - state.shipX, bullet.y - state.shipY) > 34);
       applyHit(state);
-      allBoardsOnline = state.boards.every((board) => board.solved);
     }
   }
-  if (state.danger >= 100) {
+  if (isPlaneDestroyed(state)) {
     state.phase = 'lost';
-    state.lastEvent = 'HULL FAILURE — the crew ran out of time.';
+    state.lastEvent = 'TOTAL SYSTEM FAILURE — all six aircraft systems are destroyed.';
   } else if (allBoardsOnline && Math.abs(state.shipX - (FLIGHT_ARENA.x + FLIGHT_ARENA.width / 2)) <= 64 && state.shipY <= FLIGHT_ARENA.y + 24) {
     state.phase = 'won';
     state.lastEvent = `ESCAPE — all ${state.boards.length} routing board${state.boards.length === 1 ? '' : 's'} stabilized.`;
@@ -388,55 +618,68 @@ export function updateRound(state: GameState, deltaSeconds: number, movement: { 
 
 function clamp(value: number, minimum: number, maximum: number): number { return Math.max(minimum, Math.min(maximum, value)); }
 
-function makeProjectile(x: number, y: number, angle: number, speed: number, color: number, diamond = false): Projectile {
+function makeProjectile(x: number, y: number, angle: number, speed: number, color: number, radius: number, diamond = false): Projectile {
   return {
     x, y, previousX: x, previousY: y,
     velocityX: Math.cos(angle) * speed, velocityY: Math.sin(angle) * speed,
-    radius: diamond ? 5.5 : 5, color, diamond,
+    radius, color, diamond,
   };
 }
 
 function spawnDanmakuPattern(state: GameState): void {
-  const pattern = state.patternIndex % 3;
-  const side = (Math.floor(state.patternIndex / 3) + (state.runSeed % 4)) % 4;
+  const random = seededRandom(mixSeed(state.runSeed ^ 0x6d2b79f5, state.patternIndex));
+  let pattern = Math.floor(random() * 4);
+  if (pattern === state.lastPattern) pattern = (pattern + 1 + Math.floor(random() * 3)) % 4;
+  state.lastPattern = pattern;
+  const side = Math.floor(random() * 4);
   const difficulty = Math.min(config.PATTERN_MAX_DIFFICULTY, Math.floor(state.elapsed / config.PATTERN_DIFFICULTY_TIER_SECONDS));
-  const speed = config.PATTERN_SPEED_BASE + difficulty * config.PATTERN_SPEED_PER_DIFFICULTY;
   const color = [0xff7597, 0xffc66e, 0x72d8ff, 0xb69aff][side];
   const left = FLIGHT_ARENA.x + 8;
   const right = FLIGHT_ARENA.x + FLIGHT_ARENA.width - 8;
   const top = FLIGHT_ARENA.y + 8;
   const bottom = FLIGHT_ARENA.y + FLIGHT_ARENA.height - 8;
-  const sideOrigin = (): { x: number; y: number } => {
-    switch (side) {
-      case 0: return { x: left, y: top + FLIGHT_ARENA.height * 0.5 };
-      case 1: return { x: left + FLIGHT_ARENA.width * 0.5, y: top };
-      case 2: return { x: right, y: top + FLIGHT_ARENA.height * 0.5 };
-      default: return { x: left + FLIGHT_ARENA.width * 0.5, y: bottom };
-    }
-  };
+  const safe = (x: number, y: number) => Math.hypot(x - state.shipX, y - state.shipY) >= config.PATTERN_NO_SPAWN_RADIUS;
+  const perimeter: Array<{ x: number; y: number }> = [];
+  for (let i = 0; i < 9; i++) {
+    const t = i / 8;
+    perimeter.push({ x: left, y: top + t * (bottom - top) }, { x: right, y: top + t * (bottom - top) });
+    perimeter.push({ x: left + t * (right - left), y: top }, { x: left + t * (right - left), y: bottom });
+  }
+  const safeEmitters = perimeter.filter((point) => safe(point.x, point.y));
+  if (safeEmitters.length === 0) { state.patternIndex += 1; return; }
+  const emitter = safeEmitters[Math.floor(random() * safeEmitters.length)];
+  const difficultySpeed = difficulty * 7;
 
   if (pattern === 0) {
-    const origin = sideOrigin();
+    // Fine, fast fan. Every lane starts far enough from the ship to preserve reaction time.
+    const origin = emitter;
     const centerAngle = Math.atan2(state.shipY - origin.y, state.shipX - origin.x);
-    for (let i = -4; i <= 4; i++) state.bullets.push(makeProjectile(origin.x, origin.y, centerAngle + i * 0.11, speed, color));
+    for (let i = -4; i <= 4; i++) state.bullets.push(makeProjectile(origin.x, origin.y, centerAngle + i * 0.105, config.PATTERN_NEEDLE_SPEED + difficultySpeed, color, 3.4));
   } else if (pattern === 1) {
-    const offsetX = ((state.runSeed >>> 4) % 181) - 90;
-    const offsetY = ((state.runSeed >>> 12) % 161) - 80;
-    const originX = FLIGHT_ARENA.x + FLIGHT_ARENA.width / 2 + offsetX;
-    const originY = FLIGHT_ARENA.y + FLIGHT_ARENA.height / 2 + offsetY;
+    // Slow heavy rounds arrive in a loose stream, keeping clear gaps between them.
+    const count = 5 + difficulty;
+    for (let i = 0; i < count; i++) {
+      const origin = safeEmitters[Math.floor(random() * safeEmitters.length)] ?? emitter;
+      const angle = Math.atan2(state.shipY - origin.y, state.shipX - origin.x) + (random() - 0.5) * 0.48;
+      state.bullets.push(makeProjectile(origin.x, origin.y, angle, config.PATTERN_HEAVY_SPEED + difficulty * 4, 0xffaa73, 7.2, true));
+    }
+  } else if (pattern === 2) {
+    // Radial spokes from a perimeter emitter, never from beside the ship.
     const count = config.PATTERN_RADIAL_COUNT_BASE + difficulty * config.PATTERN_RADIAL_COUNT_PER_DIFFICULTY;
-    const rotation = (state.patternIndex * 0.31 + (state.runSeed % 628) / 100) % (Math.PI * 2);
+    const rotation = random() * Math.PI * 2;
     for (let i = 0; i < count; i++) {
       const angle = rotation + (Math.PI * 2 * i) / count;
-      state.bullets.push(makeProjectile(originX, originY, angle, speed * config.PATTERN_RADIAL_SPEED_FACTOR, 0xc08cff, true));
+      state.bullets.push(makeProjectile(emitter.x, emitter.y, angle, config.PATTERN_RADIAL_SPEED + difficulty * 4, 0xc08cff, 4.5, true));
     }
   } else {
-    const fromHorizontalSide = side % 2 === 0;
-    const openingCoordinate = fromHorizontalSide ? state.shipY : state.shipX;
-    const span = fromHorizontalSide ? FLIGHT_ARENA.height : FLIGHT_ARENA.width;
-    const start = fromHorizontalSide ? top : left;
-    const spacing = span / 20;
-    for (let i = 1; i < 20; i++) {
+    // Edge rake leaves a broad gap around the pilot's current lane.
+    const fromVerticalEdge = side % 2 === 0;
+    const openingCoordinate = fromVerticalEdge ? state.shipY : state.shipX;
+    const span = fromVerticalEdge ? FLIGHT_ARENA.height : FLIGHT_ARENA.width;
+    const start = fromVerticalEdge ? top : left;
+    const count = 14;
+    const spacing = span / (count + 1);
+    for (let i = 1; i <= count; i++) {
       const coordinate = start + i * spacing;
       if (Math.abs(coordinate - openingCoordinate) < config.PATTERN_SWEEP_OPENING_MARGIN) continue;
       let x: number; let y: number; let angle: number;
@@ -444,7 +687,7 @@ function spawnDanmakuPattern(state: GameState): void {
       else if (side === 1) { x = coordinate; y = top; angle = Math.PI / 2; }
       else if (side === 2) { x = right; y = coordinate; angle = Math.PI; }
       else { x = coordinate; y = bottom; angle = -Math.PI / 2; }
-      state.bullets.push(makeProjectile(x, y, angle, speed * config.PATTERN_SWEEP_SPEED_FACTOR, 0x73e5cb, true));
+      if (safe(x, y)) state.bullets.push(makeProjectile(x, y, angle, config.PATTERN_RAKE_SPEED + difficulty * 5, 0x73e5cb, 4.7, true));
     }
   }
   state.patternIndex += 1;
@@ -467,15 +710,14 @@ function projectileHitShip(bullet: Projectile, previousShipX: number, previousSh
 
 function applyHit(state: GameState): void {
   const mayOpenBoard = state.hitBoardCooldown <= 0;
-  state.hitCooldown = config.SHIP_HIT_COOLDOWN_SECONDS;
+  state.hitCooldown = computePlaneMultipliers(state).invulnSeconds;
   if (mayOpenBoard) state.hitBoardCooldown = HIT_BOARD_COOLDOWN;
-  state.danger = Math.min(config.DANGER_MAX, state.danger + config.DANGER_HIT_PENALTY);
+  const event = damageRandomPart(state);
+  if (state.phase === 'lost') return;
   if (mayOpenBoard && state.boards.length < state.boardCapacity) {
     state.desiredBoardCount = Math.min(state.boardCapacity, Math.max(state.desiredBoardCount, state.boards.length + 1));
     addBoard(state, 'pilot hit');
-    state.lastEvent = `IMPACT — hull +14%. New routing problem: B${state.boards[state.boards.length - 1].id}.`;
-  } else {
-    state.lastEvent = `IMPACT — hull +14%. ${state.boards.length >= state.boardCapacity ? 'Board capacity reached.' : 'No new board this hit.'}`;
+    if (event) state.lastEvent = `IMPACT — ${PART_LABELS[event.partId]} ${PART_LEVEL_NAMES[event.newLevel]}.`;
   }
 }
 
@@ -518,7 +760,7 @@ function traceWires(tiles: Map<string, WireTile>, level: LevelDefinition, start:
   return result;
 }
 
-function calculatePower(tiles: Map<string, WireTile>, level: LevelDefinition): { powered: Set<string>; gateInputs: Set<string> } {
+export function calculatePower(tiles: Map<string, WireTile>, level: LevelDefinition): { powered: Set<string>; gateInputs: Set<string> } {
   const powered = new Set<string>();
   const gateInputs = new Set<string>();
   if (!level.gate) {

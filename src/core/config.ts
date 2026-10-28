@@ -17,24 +17,21 @@ export interface GameConfig {
   // Seconds cooldown before another hit-triggered board can be created.
   HIT_BOARD_COOLDOWN_SECONDS: number;
 
-  // --- Danger --------------------------------------------------------------
-  DANGER_MAX: number;
-  // Danger added per second when not every board is online.
-  DANGER_DRAIN_PER_SECOND: number;
-  // Danger added per second when every board is online.
-  DANGER_DRAIN_PER_SECOND_ONLINE: number;
-  // Danger added when a live wire is replaced (short).
-  DANGER_SHORT_PENALTY: number;
-  // Danger removed when a board goes from unsolved -> solved.
-  DANGER_SOLVE_REDUCTION: number;
-  // Danger added when the ship is hit.
-  DANGER_HIT_PENALTY: number;
-
   // --- Ship ----------------------------------------------------------------
   SHIP_SPEED: number;
   SHIP_SPEED_ONLINE: number;
-  // Seconds of invulnerability after a hit.
-  SHIP_HIT_COOLDOWN_SECONDS: number;
+  // How quickly the plane can redirect its current velocity toward new input.
+  SHIP_STEERING_RATE: number;
+  // Base per-viewer chat command cooldown before Comms damage multiplies it.
+  CHAT_COMMAND_COOLDOWN_SECONDS: number;
+  MAX_REPAIR_CREDITS: number;
+  // Plane part multipliers indexed by damage state 0..3.
+  PLANE_ENGINE_SPEED_MULTIPLIERS: readonly number[];
+  PLANE_HULL_INVULN_SECONDS: readonly number[];
+  PLANE_AVIONICS_TURN_MULTIPLIERS: readonly number[];
+  PLANE_FUEL_ATTACK_RATE_MULTIPLIERS: readonly number[];
+  PLANE_COMMS_COMMAND_COOLDOWN_MULTIPLIERS: readonly number[];
+  PLANE_LIFE_SUPPORT_SHAKE_MULTIPLIERS: readonly number[];
 
   // --- Danmaku patterns ----------------------------------------------------
   // Seconds before the first pattern spawns.
@@ -51,10 +48,11 @@ export interface GameConfig {
   PATTERN_MAX_DIFFICULTY: number;
 
   // Pattern speeds (pixels / second).
-  PATTERN_SPEED_BASE: number;
-  PATTERN_SPEED_PER_DIFFICULTY: number;
-  PATTERN_RADIAL_SPEED_FACTOR: number;
-  PATTERN_SWEEP_SPEED_FACTOR: number;
+  PATTERN_NO_SPAWN_RADIUS: number;
+  PATTERN_NEEDLE_SPEED: number;
+  PATTERN_HEAVY_SPEED: number;
+  PATTERN_RADIAL_SPEED: number;
+  PATTERN_RAKE_SPEED: number;
 
   // Pattern counts.
   PATTERN_RADIAL_COUNT_BASE: number;
@@ -75,16 +73,17 @@ export const GAME_CONFIG: GameConfig = {
   BOARD_SPAWN_INTERVAL_SECONDS: 0.75,
   HIT_BOARD_COOLDOWN_SECONDS: 8,
 
-  DANGER_MAX: 100,
-  DANGER_DRAIN_PER_SECOND: 1.25,
-  DANGER_DRAIN_PER_SECOND_ONLINE: 0.25,
-  DANGER_SHORT_PENALTY: 22,
-  DANGER_SOLVE_REDUCTION: 18,
-  DANGER_HIT_PENALTY: 14,
-
   SHIP_SPEED: 230,
   SHIP_SPEED_ONLINE: 270,
-  SHIP_HIT_COOLDOWN_SECONDS: 1.15,
+  SHIP_STEERING_RATE: 8.5,
+  CHAT_COMMAND_COOLDOWN_SECONDS: 0.85,
+  MAX_REPAIR_CREDITS: 3,
+  PLANE_ENGINE_SPEED_MULTIPLIERS: [1, 0.85, 0.7, 0.5],
+  PLANE_HULL_INVULN_SECONDS: [1.15, 0.9, 0.6, 0.3],
+  PLANE_AVIONICS_TURN_MULTIPLIERS: [1, 0.8, 0.6, 0.4],
+  PLANE_FUEL_ATTACK_RATE_MULTIPLIERS: [1, 1.2, 1.45, 1.75],
+  PLANE_COMMS_COMMAND_COOLDOWN_MULTIPLIERS: [1, 1.5, 2, 3],
+  PLANE_LIFE_SUPPORT_SHAKE_MULTIPLIERS: [1, 1.5, 2, 3],
 
   PATTERN_INITIAL_DELAY_SECONDS: 1.1,
   PATTERN_BASE_INTERVAL_SECONDS: 1.85,
@@ -93,10 +92,11 @@ export const GAME_CONFIG: GameConfig = {
   PATTERN_DIFFICULTY_TIER_SECONDS: 35,
   PATTERN_MAX_DIFFICULTY: 2,
 
-  PATTERN_SPEED_BASE: 132,
-  PATTERN_SPEED_PER_DIFFICULTY: 13,
-  PATTERN_RADIAL_SPEED_FACTOR: 0.78,
-  PATTERN_SWEEP_SPEED_FACTOR: 0.72,
+  PATTERN_NO_SPAWN_RADIUS: 160,
+  PATTERN_NEEDLE_SPEED: 198,
+  PATTERN_HEAVY_SPEED: 86,
+  PATTERN_RADIAL_SPEED: 126,
+  PATTERN_RAKE_SPEED: 112,
 
   PATTERN_RADIAL_COUNT_BASE: 16,
   PATTERN_RADIAL_COUNT_PER_DIFFICULTY: 2,

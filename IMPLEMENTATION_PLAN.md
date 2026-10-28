@@ -4,8 +4,8 @@
 
 **Starting point:** The workspace contains the GDD and this plan, but no application source. **Decision: use Phaser + TypeScript** for the browser prototype, with Vite as the build/dev server. Phaser’s official project guidance supports TypeScript templates and Phaser 4 is the current open-source 2D framework line. Revisit only if a concrete setup or team-familiarity issue blocks progress.
 
-**Current status:** The local Phaser prototype, Standard and AND-gate board templates, latest-write wire replacement, numbered multi-board state, single-board navigation, seeded map generation, and first all-directions danmaku pass are implemented. `npm run build` passes. Visual, stream-scale, and playability QA for the new arena remains. Live Twitch authorization/chat still need a smoke session; public hosting is not configured yet.
-**Validation note:** `npm run build` passes (TypeScript check plus Vite production bundle). Interactive browser review could not reach the local server from the available in-app browser, so visual/runtime QA still needs a normal browser session. Vite reports a large Phaser bundle (~1.4 MB minified, ~378 KB gzip); acceptable for this prototype, but worth revisiting before public hosting.
+**Current status:** The local Phaser prototype now includes Standard and AND-gate boards, replaceable wires, scalable numbered boards, four fairer danmaku families, seeded validated layouts, a campaign flight desk with local saves/settings, six-part aircraft damage/repair, and the Twitch adapter. `npm run build` passes. Stream-scale balance and live Twitch authorization/chat still need a smoke session; public hosting is not configured yet.
+**Validation note (2026-10-28):** `npm run build` passes (TypeScript check plus Vite production bundle). Browser review confirms the initial mission picker and full-screen HUD render. Vite reports a large Phaser bundle (~1.44 MB minified, ~389 KB gzip); acceptable for this prototype, but worth revisiting before public hosting.
 
 ## Demo scope
 
@@ -15,7 +15,7 @@
 - Latest-write wire placement: a new wire command replaces the previous wire in its cell and immediately recalculates power. Fixed source, destination, hull, and gate cells remain protected. Replacing an energized wire still triggers the bounded short penalty, while the replacement takes effect.
 - Pilot movement with a small keyboard control set.
 - Viewer placements that visibly alter the grid; power connectivity updates immediately.
-- One legible short-circuit penalty and one danger meter.
+- One legible short-circuit penalty and the six-part aircraft damage system. (The initial danger meter was superseded by Plane Systems.)
 - A start screen, connection status, short command instructions, round result, and restart.
 - Local/demo input plus Twitch chat input through the same game command interface.
 - A hosted HTTPS link suitable for opening during a Twitch stream.
@@ -210,15 +210,79 @@ Research should recur at decision points rather than be a one-time kickoff. Befo
 ## Implementation status
 
 - **Phase 0 — stack setup:** Phaser 4 + TypeScript + Vite selected and installed. Local EventSub verification is pending Twitch app registration/configuration.
-- **Phase 1 — local playable loop:** Implemented and user-confirmed for the standard level: one 7 × 5 grid, A3 power core, G3 drive, blocked D3, six wire orientations, keyboard flight, danger meter, short penalty, win/loss, restart, local command input, swept bullet volleys, moving safe gap, collision damage/knockback, and hit feedback.
+- **Phase 1 — local playable loop (historical baseline):** Implemented and user-confirmed for the standard level: one 7 × 5 grid, A3 power core, G3 drive, blocked D3, six wire orientations, keyboard flight, short penalty, win/loss, restart, local command input, swept bullet volleys, moving safe gap, collision damage/knockback, and hit feedback. The danger-meter loss/pressure was later replaced by Plane Systems.
 - **Phase 1A — two missions and replaceable wires:** Implemented. Players can choose Standard Routing or Logic Gate Routing. The logic mission requires both labeled inputs to power the fixed AND gate before its output can energize the drive. Latest placement replaces the cell’s previous wire; replacing an energized wire still applies the short penalty, then recalculates power using the new orientation. Local command sequences for both routes are in the README. `npm run build` passes; a hands-on browser playthrough of both routes and the replacement consequence remains the next QA step.
 - **Phase 1B — scalable multi-board routing:** Implemented. Runs start with one board, with the chat-driven target at roughly one board per 100 unique active chatter IDs (one board through 100, two at 101–200, etc.). Capacity preserves a two-board low-activity maximum and one additional hit-triggered slot where possible; pilot-hit additions are limited to one per eight seconds. Commands target boards by ID. Standard maps use seeded A* route search; AND maps retain clear, separated input routes with seeded obstacle variation. Both are validated with the same connectivity rules used in play. All active boards must be powered before extraction. Hands-on gameplay and load/balance tuning remain.
 - **Phase 1C — board navigation and local scaling:** Implemented. The overview reports template, solved state, accepted wire-placement count, and recent activity. Local controls add 100, 1,000, or 10,000 distinct simulated chatter IDs or trigger a pilot hit. Phase 1D replaces the dual-grid presentation with a single selected board.
 - **Phase 1D — single-board view and all-directions danmaku:** Implemented. One 7 × 5 board grid is selected from numbered buttons, with B1 as the default. The square flight arena is 570 × 570 and includes four-edge aimed fans, radial rings, and edge sweeps; warning/safe-lane UI is removed. The ship has a visible center hit core, swept projectile collision, and 1.15 seconds of invulnerability after a hit. `npm run build` passes; playthrough and stream-scale balance QA remain.
 - **Phase 2 — Twitch adapter:** Adapter implemented: browser OAuth, state check, token validation, EventSub WebSocket subscription, reconnect/revocation handling, duplicate suppression, per-viewer/global command pacing, and visible connection state. Live authorization and chat receipt are the next verification tasks.
+- **Plane Systems core feature — implemented 2026-10-28:** Six damageable aircraft parts, gameplay multipliers, hit/short damage, finite board-earned chat repair (`!repair <part>`), all-parts-destroyed loss, and full-screen Phaser HUD are implemented. Local/demo and Twitch commands share the bounded frame-boundary input queue. Details and decisions are in `PLANE_SYSTEMS_PLAN.md`; playthrough, balance, stream-scale, and live Twitch verification remain.
 - **Core input integration — completed 2026-10-28:** Demo, simulated activity/hits, and Twitch wire commands enter bounded queues in `GameScene`; commands are applied at the start of the Phaser update frame (up to 16 placements per frame), keeping Twitch callbacks from mutating gameplay mid-frame. Chatter IDs are drained in batches to avoid a single 10,000-chatter simulation spike.
 - **Twitch lifecycle hardening — completed 2026-10-28:** EventSub keepalive watchdog, safer replacement-socket handoff, stale-socket close protection, permanent 4xx subscription failure handling, and visible throttling notices are implemented. OAuth remains browser-only with no client secret. Live authorization/chat behavior is unverified until run with the registered Client ID and channel.
+- **Campaign menu / gameplay-readability slice — implemented 2026-10-29:** Semantic DOM flight desk, Continue/New Save campaign flow, Standard-to-AND unlock and replay selection, versioned local campaign save with separate display settings, fullscreen/UI scale/reduced-motion/screen-shake controls, original flight-manual visual direction, removed noisy hit/capacity status, corrected board-header hierarchy, four seeded no-warning projectile families with safe emission distance, and seeded randomized Standard/AND maps validated with `calculatePower`. Production build passes; browser flow, viewport and property checks passed. Portrait flight view asks for landscape. Live Twitch and stream-scale balance remain unverified.
 - **Phase 3 — stream-ready demo:** Pending. Requires an HTTPS host and adding the exact deployed URL as a Twitch OAuth redirect URL, then a live-channel session to tune pacing and confirm the connection.
+
+## Latest implementation slice — campaign menu and gameplay readability
+
+**Delivered 2026-10-29:** The following architecture and product decisions now describe the implemented prototype. They remain the acceptance contract for follow-up fixes and Twitch/stream-scale QA.
+
+### Product decisions
+
+- The main menu offers **Continue**, **New Save**, **Connect/Disconnect Twitch**, and **Settings**. Twitch remains optional; the local demo command panel remains usable without authorization.
+- One local campaign profile is supported. A new profile starts at Standard Routing. Winning Standard unlocks the existing AND-gate mission. Continue starts the earliest unlocked incomplete mission as a fresh sortie; it does not restore a mid-run state. When both missions are complete, Continue opens mission replay selection.
+- New Save asks for confirmation, resets campaign progress, and preserves display preferences. Settings use a separate storage key from campaign progress.
+- v1 settings are fullscreen, UI scale, reduced motion, and screen shake. Do not add audio settings until audio controls exist.
+- Reconnect the existing Twitch adapter from the menu without replacing its OAuth/EventSub lifecycle. Keep tokens in memory only; never put them in campaign or settings data.
+- Visual direction: an original **flight manual / instrument-panel** language for Dead Circuit—ink-dark field, warm pale labels, restrained teal/amber/red status colors, one condensed title face paired with readable body text, compact coordinate typography, hard edges and thin separators. Use asymmetric composition and a clear primary action; avoid generic card grids, all-caps-everywhere copy, nested rounded panels, and decorative glow without a gameplay purpose. Create original marks and textures; do not copy a particular website’s layout, assets, or trade dress.
+
+### Architecture and work order
+
+1. **Campaign state and storage contract**
+   - Add a small framework-independent campaign model and pure operations for starting/resetting a profile, selecting the next mission, and recording win/loss outcomes.
+   - Persist a versioned campaign record with unlocked/completed mission IDs. Do not persist the active board, ship state, Twitch identity, access token, or EventSub session.
+   - Store campaign and global display settings separately. Treat missing, malformed, or unsupported stored data as a safe new profile/default settings, without blocking launch.
+2. **Menu shell and app orchestration**
+   - Put menu, settings, and confirmation dialogs in semantic DOM controls layered with the Phaser game rather than drawing interactive text/buttons into the canvas. Keep Phaser responsible for the game world and simulation; add a small app-level controller to coordinate campaign, scene transitions, settings, and the existing Twitch adapter.
+   - First boot: one prominent **Start / New Save** action, with Twitch connection and Settings as secondary actions. Existing profile: **Continue** is primary; **New Save**, Twitch connection state/action, and Settings remain easy to find.
+   - Show a compact connection state (offline, connecting, connected as channel). Keep Local Demo available whether Twitch is connected or not. Fullscreen must be requested directly from the user’s click/tap and report unsupported/failed states plainly.
+   - Use native buttons, labels, keyboard focus order, visible focus, Enter/Space activation, Escape to close dialogs, and reduced-motion-aware transitions.
+3. **Gameplay hierarchy and feedback cleanup**
+   - Remove the prominent “DANMAKU FLIGHT DECK” canvas title.
+   - Remove the noisy combined impact/capacity toast, including “board capacity reached.” Convey hit/part damage through the affected part card and aircraft feedback; let board count/navigation show a board addition. If a temporary status is needed, use short, concise, non-overlapping command/result feedback.
+   - Rebuild the routing header hierarchy as title, board metadata/page controls, column labels, then grid; keep row labels outside cells. Preserve the board-left / flight-arena-right relationship and square arena.
+   - Fix the current overlap between generic round/event copy and the Aircraft Systems heading. Avoid a persistent generic “round active” sentence. Keep the test panel collapsed unless explicitly opened.
+4. **Fair, varied no-warning danmaku**
+   - Keep attacks untelegraphed as requested, but make each pattern readable through shape, spacing, speed, and a persistent open lane.
+   - Reject any emitter/projectile origin within 160 logical pixels of the ship at emission. For direct aimed attacks, preserve at least 0.7 seconds of travel time at the actual velocity. If a selected pattern cannot satisfy those constraints, select a safe emitter or defer that spawn.
+   - Implement four original pattern families with tunable ranges: fast small needles in a narrow fan; slow large drifters; medium radial rings from a safe emitter; and measured edge rakes that preserve a deliberate gap. Vary size, velocity, spread/count and timing. Do not repeat the same family immediately; cap active density and retain usable movement lanes.
+   - Keep pattern choice and projectile motion deterministic from the run seed and in the pure game core. Phaser should render the resulting projectile state; do not add a physics dependency just for these patterns.
+5. **Seeded randomized boards with a solvability guarantee**
+   - Keep the existing 7 × 5 board and left-to-right signal flow, while randomizing special-cell positions inside readable bands: Standard source x=0–2 and drive x=4–6; Logic inputs x=0–2, gate x=2–4, and drive x=4–6. Randomize rows, avoid overlapping special cells, and randomize legal gate input/output sides.
+   - Use seeded candidate generation and port-aware A* route synthesis (including incoming direction in the search state) to create guaranteed route candidates. Place optional obstacles only after reserving special cells and required routes; reject candidates with awkwardly short, tangled, or visually clustered routes.
+   - A* proposes routes; it does not prove that the actual game board works. Validate each final candidate with the same `calculatePower` rules used during play: Standard must power the drive; Logic must deliver both inputs through the correct gate pins and power the drive. Retry within a fixed bound, then use a known-valid seeded fallback. Never display an unchecked candidate.
+   - Derive each board layout from the existing run/board seed so a reported seed reproduces the same board.
+6. **Verification and review**
+   - Browser property checks covered campaign transitions/storage decoding, 300 seeds per board type for deterministic unique in-bounds placements, and 160 projectile emissions across five ship locations for all four families, spawn radius, and aimed-shot travel time. A dedicated automated test runner remains a follow-up.
+   - Run a production build and browser review at 1440 × 900, 1280 × 720, and a narrow 390 × 844 viewport. Review first-load menu, settings/dialog keyboard flow, live game HUD, each pattern family, and both board templates. The desktop and mobile menu/settings and gameplay views were reviewed; portrait flight now prompts landscape.
+   - After local verification, do a real-channel Twitch smoke test only when app credentials and an authorized channel are available; hosting remains a separate Phase 3 task.
+
+### Acceptance criteria
+
+- A first-time visitor can identify the primary action quickly, start locally without Twitch, and reach either mission through the intended campaign rules.
+- Continue, New Save confirmation/reset, refresh persistence, malformed-save recovery, and preservation of display settings behave as specified.
+- Connect/disconnect and connection state use the current Twitch adapter; no OAuth token is written to browser storage.
+- Settings work with pointer and keyboard; fullscreen errors are communicated; reduced motion affects transitions and shake.
+- The board labels and systems HUD do not overlap at target desktop sizes; the game remains understandable at the narrow review size. The specified title and combined noisy hit/capacity message are absent.
+- No projectile spawns inside the no-spawn radius, and direct aimed attacks respect the minimum travel time. All four pattern families are visibly distinct and preserve a navigable gap.
+- For a fixed seed and template, generated maps repeat exactly. For a broad seeded sample, all specials stay in bounds and unique, no obstacle blocks a required path, and every displayed Standard/Logic board passes `calculatePower` validation. Invalid candidates always fall back to a valid board.
+
+### Research checkpoints
+
+- **Before menu implementation:** Recheck Phaser scene ownership and browser fullscreen behavior; the current choice is an app/DOM menu coordinating Phaser scenes, with fullscreen initiated by a direct user gesture. Phaser documents Scenes as a fit for menus and Scale Manager fullscreen controls/events: [Phaser Scenes](https://docs.phaser.io/phaser/concepts/scenes), [Phaser Scale Manager](https://docs.phaser.io/phaser/concepts/scale-manager).
+- **Before persistence implementation:** Recheck browser storage constraints and origin behavior. Local storage is origin-scoped and survives browser sessions, so campaign progress and global preferences remain local to the deployed origin; private browsing/storage denial must degrade safely: [MDN localStorage](https://developer.mozilla.org/en-US/docs/Web/API/Window/localStorage), [MDN Web Storage API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Storage_API).
+- **Before danmaku tuning:** Review the current Phaser rendering/performance guidance and test density at the intended stream resolution; tune from observed play rather than adding pooled rendering preemptively.
+- **Before map generation:** Recheck A* invariants and the current board’s exact power/gate rules. Keep deterministic seeds, bounded retries, and gameplay-rule validation; do not treat path search alone as proof of solvability.
+- **Before live Twitch verification/hosting:** Recheck current Twitch OAuth and EventSub requirements, redirect URLs, scopes, and reconnect rules against official documentation.
 
 ### Research log — 2026-10-27
 
@@ -237,6 +301,13 @@ Research should recur at decision points rather than be a one-time kickoff. Befo
 - Applied those lifecycle rules to the Twitch adapter, including keepalive timeout recovery and replacement connection handling; transient server/rate-limit errors retry, while permanent client errors end the session with visible status.
 - `GameScene` now consumes gameplay inputs at a Phaser frame boundary with bounded per-frame work. This preserves ordered chat actions and prevents large simulated chatter additions from monopolizing one update.
 - Verification: production build passes. The existing Vite large-chunk warning remains. No live Twitch smoke has been run because it requires the user's Twitch app Client ID and an authorized broadcaster/channel.
+
+### Research and implementation log — 2026-10-29
+
+- Re-checked official Phaser Scene and Scale Manager guidance before moving menu/settings/result surfaces into semantic DOM and keeping the canvas responsible for playfield rendering. Fullscreen is requested from the settings button’s direct click and listens for browser failure/enter/leave events. References: [Phaser Scenes](https://docs.phaser.io/phaser/concepts/scenes), [Phaser Scale Manager](https://docs.phaser.io/phaser/concepts/scale-manager).
+- Re-checked browser storage behavior before implementing local campaign/settings persistence. Campaign and settings use separate versioned localStorage keys; corrupt/unsupported records fall back safely, and storage denial reports session-only progress. Twitch access tokens remain in memory. Reference: [MDN localStorage](https://developer.mozilla.org/en-US/docs/Web/API/Window/localStorage).
+- Implemented and reviewed the campaign flight desk, settings, status dialogs, round result flow, game-header cleanup, safe projectile families, and seeded board generation. Browser review covered 1440 × 900, 1280 × 720, 390 × 844, and 844 × 390. Portrait gameplay presents a landscape prompt; the menu and settings remain responsive.
+- Browser-driven core checks: campaign progression/replay and malformed-save decoding; 300 deterministic seeds each for Standard and Logic layouts; 160 emissions across five ship positions, covering all four pattern families, the no-spawn radius, and aimed-shot travel time. `npm run build` passes. A live Twitch session and stream-scale audience balance were not verified.
 
 ## Decisions deliberately left open
 

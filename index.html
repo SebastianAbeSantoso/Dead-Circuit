@@ -10,91 +10,75 @@
     <title>DEAD CIRCUIT — Twitch Crew Demo</title>
   </head>
   <body>
-    <main class="app-shell">
-      <header class="topbar">
-        <div class="brand">
-          <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-          <div class="brand-text">
-            <p class="eyebrow">TWITCH CREW DEMO</p>
-            <h1>DEAD CIRCUIT</h1>
+    <main id="game-root" aria-label="Dead Circuit game"></main>
+
+    <main id="app-shell">
+      <section id="menu-screen" class="screen menu-screen" aria-labelledby="menu-title">
+        <div class="menu-backdrop" aria-hidden="true"><span class="radar-ring ring-one"></span><span class="radar-ring ring-two"></span><span class="flight-mark">DC / 07</span></div>
+        <header class="menu-topline"><span>FLIGHT OPERATIONS</span><span id="menu-channel-status" data-state="disconnected">CHANNEL / DEMO MODE</span></header>
+        <div class="menu-content">
+          <div class="menu-brand"><p class="eyebrow">DEAD CIRCUIT · CREW PROTOTYPE</p><h1 id="menu-title">KEEP THE<br /><em>SHIP ALIVE.</em></h1><p class="menu-intro">Pilot the damaged airframe. Chat routes power through the hull. Get every relay online, then make the escape run.</p></div>
+          <div class="menu-actions">
+            <button id="continue-button" class="action-primary" hidden>CONTINUE SORTIE <span aria-hidden="true">↗</span></button>
+            <button id="new-save-button" class="action-primary">START STANDARD ROUTING <span aria-hidden="true">↗</span></button>
+            <button id="connect-button" class="action-secondary">CONNECT TWITCH CHANNEL</button>
+            <button id="settings-button" class="action-secondary">FLIGHT SETTINGS</button>
+            <div id="replay-list" class="replay-list" hidden><span class="eyebrow">SELECT A MISSION</span><button data-replay="standard">01 / STANDARD ROUTING</button><button data-replay="logic">02 / AND-GATE ROUTING</button></div>
           </div>
         </div>
-        <div class="connection-box">
-          <span class="led" id="connection-dot" aria-hidden="true"></span>
-          <span id="connection-label">DEMO MODE</span>
-          <button id="connect-button" class="button button-quiet">Connect Twitch</button>
-          <button id="disconnect-button" class="button button-quiet hidden">Disconnect</button>
-        </div>
-      </header>
-
-      <dialog id="connect-dialog" class="connect-dialog"><form method="dialog" id="connect-form"><button class="dialog-close" value="cancel" aria-label="Close">×</button><p class="eyebrow">TWITCH SETUP</p><h2>Connect your channel</h2><p>Use your Twitch developer app Client ID. The app requests permission to read this channel’s chat. No client secret is used in the browser.</p><label for="client-id-input">Twitch Client ID</label><input id="client-id-input" autocomplete="off" spellcheck="false" placeholder="Paste Client ID" required /><div class="dialog-actions"><button class="button button-quiet" value="cancel">Cancel</button><button id="authorize-button" class="button button-primary" value="connect">Authorize with Twitch</button></div><small id="connect-error" class="connect-error"></small></form></dialog>
-
-      <section class="briefing" aria-label="Mission status">
-        <div class="panel briefing-copy">
-          <span id="mission-label" class="eyebrow">ROUTING TEMPLATE / STANDARD</span>
-          <h2>Pilot the ship.<br />Chat routes every board.</h2>
-          <p id="mission-copy">Each board has its own ID. Route them all, then reach the exit. A hit or growing active chat can open another board.</p>
-        </div>
-        <div class="panel danger-wrap">
-          <div class="panel-label"><span class="eyebrow">HULL INTEGRITY</span><strong id="danger-value">0%</strong></div>
-          <div class="danger-track"><div id="danger-fill"></div></div>
-          <div class="danger-scale" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
-        </div>
+        <footer class="menu-footer"><span>KEYBOARD / WASD OR ARROWS</span><span>CHAT / !b1 wire C3 LEFT RIGHT</span></footer>
       </section>
 
-      <section class="game-frame" aria-label="Game">
-        <div class="frame-brackets" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
-        <div id="game-root"></div>
-        <div class="scanlines" aria-hidden="true"></div>
-        <div class="vignette" aria-hidden="true"></div>
-        <div id="round-overlay" class="round-overlay">
-          <div class="overlay-card">
-            <p class="eyebrow">CHOOSE A BOARD TEMPLATE</p>
-            <h2 id="overlay-title">Restore the drive.</h2>
-            <p id="overlay-copy">One board starts active. Chat can open more as unique activity grows; a pilot hit can expose another repair board. Route every board, then escape.</p>
-            <div class="mission-buttons">
-              <button id="start-standard" class="button button-primary"><span class="btn-glyph" aria-hidden="true">▸</span>Start Standard Boards</button>
-              <button id="start-logic" class="button button-primary"><span class="btn-glyph" aria-hidden="true">▸</span>Start AND Gate Boards</button>
-            </div>
-          </div>
-        </div>
+      <section id="result-screen" class="screen result-screen" aria-labelledby="result-title" hidden>
+        <p class="eyebrow" id="result-kicker">SORTIE REPORT</p><h2 id="result-title">CREW EXTRACTION</h2><p id="result-copy"></p>
+        <div class="result-actions"><button id="result-primary" class="action-primary">CONTINUE</button><button id="result-menu" class="action-secondary">FLIGHT DESK</button></div>
       </section>
-
-      <section class="board-overview" aria-label="Routing board pages">
-        <div class="board-overview-head">
-          <span class="eyebrow">ROUTING BOARDS</span>
-          <strong id="board-status">1 / 2 boards · 0 active chatters</strong>
-        </div>
-        <div id="board-list" class="board-list"><button class="board-chip board-select selected" type="button" data-board-id="1">B1 · ROUTE PENDING</button></div>
-      </section>
-
-      <section class="command-dock">
-        <div class="panel command-help">
-          <span class="eyebrow">CHAT COMMAND</span>
-          <code>!b1 wire B3 LEFT RIGHT</code>
-          <p>Name two sides the wire connects: <b>UP</b> <b>DOWN</b> <b>LEFT</b> <b>RIGHT</b> · latest placement replaces that cell</p>
-        </div>
-        <form id="demo-form" class="demo-form">
-          <label for="demo-command">Local test</label>
-          <input id="demo-command" autocomplete="off" spellcheck="false" placeholder="!b1 wire B3 LEFT RIGHT" />
-          <button class="button button-primary" type="submit">Send</button>
-        </form>
-      </section>
-
-      <button id="test-features-toggle" class="button button-quiet test-features-toggle" type="button" aria-expanded="false" aria-controls="test-features-panel">Test features</button>
-      <details id="test-features-panel" class="dev-tools"><div><span>Add distinct active chatter IDs</span><button id="simulate-100-chatters" class="button button-quiet" type="button">+100</button><button id="simulate-1000-chatters" class="button button-quiet" type="button">+1,000</button><button id="simulate-10000-chatters" class="button button-quiet" type="button">+10,000</button><button id="simulate-hit" class="button button-quiet" type="button">Simulate pilot hit</button></div></details>
-
-      <section class="event-strip" aria-live="polite">
-        <span class="eyebrow">CREW LOG</span>
-        <div id="event-feed" class="event-feed"><p>Waiting for the pilot to start the run.</p></div>
-      </section>
-
-      <footer>
-        <span class="foot-cell"><b>WASD</b> / ARROWS — DODGE</span>
-        <span class="foot-cell"><b>DANMAKU</b> FROM ALL SIDES</span>
-        <span class="foot-cell"><b>ESCAPE</b> — POWER ALL BOARDS</span>
-      </footer>
+      <aside id="event-toast" class="event-toast" role="status" aria-live="polite" hidden></aside>
+      <aside class="portrait-notice" aria-live="polite"><strong>TURN FOR FLIGHT</strong>Dead Circuit’s flight deck is built for landscape. Chat routing commands still work here.</aside>
     </main>
+
+    <form id="demo-form" class="demo-form" aria-label="Local chat command">
+      <label class="sr-only" for="demo-command">Enter a local chat command</label>
+      <input id="demo-command" autocomplete="off" spellcheck="false" placeholder="!b1 wire B3 LEFT RIGHT  ·  !repair hull" />
+      <button type="submit" aria-label="Send local command">SEND</button>
+    </form>
+
+    <dialog id="connect-dialog" class="connect-dialog">
+      <form method="dialog" id="connect-form">
+        <button class="dialog-close" value="cancel" aria-label="Close">×</button>
+        <p class="eyebrow">TWITCH SETUP</p>
+        <h2>Connect your channel</h2>
+        <p>Use your Twitch developer app Client ID. The app requests permission to read this channel’s chat. No client secret is used in the browser.</p>
+        <label for="client-id-input">Twitch Client ID</label>
+        <input id="client-id-input" autocomplete="off" spellcheck="false" placeholder="Paste Client ID" required />
+        <div class="dialog-actions">
+          <button class="button button-quiet" value="cancel">Cancel</button>
+          <button id="authorize-button" class="button button-primary" value="connect">Authorize with Twitch</button>
+        </div>
+        <small id="connect-error" class="connect-error"></small>
+      </form>
+    </dialog>
+
+    <dialog id="settings-dialog" class="connect-dialog settings-dialog" aria-labelledby="settings-title">
+      <form method="dialog" id="settings-form">
+        <button class="dialog-close" value="cancel" aria-label="Close settings">×</button>
+        <p class="eyebrow">FLIGHT DESK</p><h2 id="settings-title">Display settings</h2>
+        <label class="setting-row" for="ui-scale"><span><b>Interface scale</b><small>Adjust menu and command controls</small></span><output id="ui-scale-value" for="ui-scale">100%</output></label>
+        <input id="ui-scale" class="scale-input" type="range" min="0.85" max="1.15" step="0.05" />
+        <label class="setting-toggle"><span><b>Reduced motion</b><small>Quiet transitions and hit effects</small></span><input id="reduced-motion" type="checkbox" /></label>
+        <label class="setting-toggle"><span><b>Screen shake</b><small>Impact feedback during flight</small></span><input id="screen-shake" type="checkbox" /></label>
+        <div class="dialog-actions setting-actions"><button id="fullscreen-button" type="button" class="button button-quiet">ENTER FULLSCREEN</button><button class="button button-primary" value="close">DONE</button></div>
+        <small id="settings-message" class="connect-error" role="status"></small>
+      </form>
+    </dialog>
+
+    <dialog id="new-save-dialog" class="connect-dialog confirm-dialog" aria-labelledby="new-save-title">
+      <form method="dialog">
+        <p class="eyebrow">CAMPAIGN DATA</p><h2 id="new-save-title">Start a new campaign?</h2>
+        <p>This clears mission progress in this browser. Display settings stay as they are.</p>
+        <div class="dialog-actions"><button class="button button-quiet" value="cancel">KEEP PROGRESS</button><button id="confirm-new-save" class="button button-primary" value="confirm">RESET CAMPAIGN</button></div>
+      </form>
+    </dialog>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

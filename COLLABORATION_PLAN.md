@@ -5,10 +5,10 @@ Shared working document for Codex (primary gameplay implementation) and the supp
 ## 1. Project snapshot (verified facts)
 
 - **Stack:** Phaser 4 (`^4.2.0`) + TypeScript 5 (`^5.9.0`) + Vite 7 (`^7.1.0`), npm, ES modules. `npm run build` (`tsc --noEmit && vite build`) passes.
-- **Game core (framework-independent):** `src/core/multiGame.ts` (542 lines) holds state, rules, power tracing, map generation, projectile patterns, and round win/loss. `src/core/game.ts` holds level definitions, tile kinds, board size, and the two board templates (standard, AND-gate logic).
+- **Game core (framework-independent):** `src/core/multiGame.ts` holds state, rules, power tracing, map generation, projectile patterns, plane systems, and round win/loss. `src/core/game.ts` holds level definitions, tile kinds, board size, and the two board templates (standard, AND-gate logic).
 - **Render:** `src/game/GameScene.ts` (Phaser scene) — drawing, ship input, board selection, delegates game-step to `multiGame`.
 - **Twitch:** `src/twitch/TwitchChat.ts` — OAuth, EventSub WebSocket lifecycle/keepalive/reconnect, command deduplication and pacing, demo mode fallback.
-- **DOM glue:** `src/main.ts` wires Twitch + scene + HUD; `index.html` + `src/style.css` provide the shell/HUD.
+- **DOM glue:** `src/main.ts` wires Twitch + scene; `index.html` + `src/style.css` provide the canvas shell, Twitch dialog, and local command entry.
 - **Docs:** `GDD.md` (design), `IMPLEMENTATION_PLAN.md` (solo-dev history), `README.md` (how to run).
 - **Content:** 7×5 boards, scalable multi-board via unique active chatters (~100 per board, hard cap 100), danmaku flight arena (570×570), Standard and AND-gate templates, seeded map generation, local demo mode without Twitch.
 - **Tuning:** `src/core/config.ts` centralizes gameplay and scaling constants.
@@ -17,7 +17,7 @@ Shared working document for Codex (primary gameplay implementation) and the supp
 
 **Codex — primary gameplay / core player-facing experience:**
 - Board templates, wire-placement rules, connectivity/power logic (core gameplay)
-- Ship movement, bullet patterns, round win/loss, danger meter
+- Ship movement, bullet patterns, round win/loss, six-part plane damage and repair
 - Twitch command flow into the game, command grammar/UX
 - HUD/game-feel choices Codex makes for the player-facing experience
 
@@ -106,14 +106,16 @@ Flag any assumption that looks wrong early.
 
 Config extraction is complete. Tests and future refactoring remain available as supporting-engineer work; keep Twitch and game logic in their current ownership areas.
 
-## 9. Active design direction — Plane Systems
+## 9. Implemented core feature — Plane Systems
 
 See `PLANE_SYSTEMS_PLAN.md` for the full spec. Summary of the shift:
 
 - **Full-screen Phaser canvas** (`window.innerWidth × window.innerHeight`, `Scale.RESIZE`), replacing the centered 1240×760 canvas.
 - **Remove all gameplay DOM HUD** (danger meter, board overview, command dock, event strip, footer, briefing). Keep only the connect dialog and demo command input as DOM.
-- **Plane damage system:** 6 parts (Engine, Hull, Avionics, Fuel, Comms, Life Support), each with states Operational → Damaged → Critical → Destroyed. Pilot hit escalates a random part; repair decrements it. All 6 Destroyed = loss. Each part state changes a gameplay multiplier (speed, turn, drain, cooldown, shake).
-- Loss condition moves from `danger >= 100` to `isPlaneDestroyed(state)`.
+- **Plane damage system implemented:** 6 parts (Engine, Hull, Avionics, Fuel, Comms, Life Support), each with states Operational → Damaged → Critical → Destroyed. Bullet hits and live-wire shorts escalate a random part; `!repair <part>` spends a reserve earned by solving a board. All 6 Destroyed = loss.
+- Part effects implemented: speed, hit invulnerability, steering response, danmaku cadence, per-viewer command cooldown, and hit shake. Life Support destruction adds a red edge vignette.
+- Full-screen Phaser canvas now contains the gameplay HUD, board navigation, mission selection, test panel, connection control, airframe cards, and end screens. The DOM retains only Twitch authorization and local command entry.
+- Core local/demo and Twitch commands use the same bounded frame-boundary queue. See `PLANE_SYSTEMS_PLAN.md` for details and remaining QA. Live Twitch authorization/chat is unverified.
 
 Update `COLLABORATION_PLAN.md` sections 1, 3, 4, 6, 8 to match as Codex implements.
 
