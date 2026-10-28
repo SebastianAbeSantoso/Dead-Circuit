@@ -26,6 +26,39 @@ const game = new Phaser.Game({
 const overlay = $('round-overlay');
 const overlayTitle = $('overlay-title');
 const overlayCopy = $('overlay-copy');
+const gameFrame = $('game-frame') as HTMLElement;
+
+/** emil-design-eng: screen shake on hit — transient, interruptible, then cleanup. */
+function shakeGameFrame(): void {
+  gameFrame.classList.add('shake');
+  setTimeout(() => gameFrame.classList.remove('shake'), 400);
+}
+
+/** @starting-style fallback for browsers that don't support it (Safari, older Chrome). */
+function applyStartingStyleFallback(): void {
+  if (CSS.supports('starting-style: 0')) return;
+  const observer = new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
+        const el = mutation.target as HTMLElement;
+        if (el.classList.contains('round-overlay') && !el.classList.contains('hidden')) {
+          const card = el.querySelector('.overlay-card') as HTMLElement | null;
+          if (card) {
+            card.style.opacity = '0';
+            card.style.transform = 'scale(0.94)';
+            requestAnimationFrame(() => {
+              card.style.opacity = '1';
+              card.style.transform = 'scale(1)';
+            });
+          }
+        }
+      }
+    }
+  });
+  observer.observe(overlay, { attributes: true, subtree: false });
+}
+
+applyStartingStyleFallback();
 const startButtons: Array<[LevelId, HTMLButtonElement]> = [
   ['standard', $('start-standard') as HTMLButtonElement],
   ['logic', $('start-logic') as HTMLButtonElement],
@@ -46,6 +79,8 @@ function addFeed(message: string, good: boolean): void {
     line.textContent = item;
     return line;
   }));
+  // emil-design-eng: transient screen shake on hit — immediate, bounded, cleans up
+  if (message.startsWith('IMPACT')) shakeGameFrame();
 }
 
 scene.onEvent = addFeed;
