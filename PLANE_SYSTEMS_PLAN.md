@@ -114,6 +114,36 @@ export function isPlaneDestroyed(state: GameState): boolean;
 
 ---
 
+## 4b. Animation Spec for Part UI (emil-design-eng / apple-design)
+
+| Event | Animation | Duration | Easing | Reduced-Motion |
+|---|---|---|---|---|
+| Part hit (flash) | Scale 1.0 → 1.15 → 1.0 + cyan pulse | 120ms | ease-out | Instant state swap, no flash |
+| Part level change | Cross-fade old→new icon + ring color shift | 200ms | ease-out | Instant swap |
+| Part repair | Green flash + ring color shift | 180ms | ease-out | Instant swap |
+| Part destroyed | Red pulse + icon dim + vignette expand | 300ms | ease-out | Instant dim |
+
+Rules:
+- All part UI uses `transform` + `opacity` only (GPU)
+- No layout-triggering animations (width/height/margin)
+- Phaser tweens, not CSS, for canvas objects
+- Prefers-reduced-motion: all above disabled, instant state changes
+
+---
+
+## 4c. Part State Color Palette (taste / impeccable)
+
+| State | Fill | Ring | Text/Icon | Meaning |
+|---|---|---|---|---|
+| Operational | #0d1a1c | #6ef0d6 | #c9fff4 | Healthy |
+| Damaged | #1a1408 | #f3c575 | #f3c575 | Caution |
+| Critical | #1a0808 | #ff5f52 | #ff5f52 | Danger |
+| Destroyed | #0a0505 | #332222 | #553333 | Lost |
+
+All 6 parts use same palette — coherence over variety.
+
+---
+
 ## 5. Full-screen UI migration (inside Phaser)
 
 Codex owns `GameScene.ts` render. Supporting engineer owns CSS removal and config wiring.
@@ -148,6 +178,16 @@ Codex owns `GameScene.ts` render. Supporting engineer owns CSS removal and confi
 **M4 — In-canvas part UI** (Codex)
 - Draw 6 part status icons inside the game canvas with color by damage level.
 - Flash the hit part on impact; show repaired state change.
+
+**M4 Acceptance Criteria (impeccable / taste / emil-design-eng / apple-design):**
+- Part grid readable at 720p stream size (test in OBS / browser zoom).
+- `impeccable critique` passes on part grid (layout, color, hierarchy, visual hierarchy).
+- Animation spec from 4b implemented: hit flash 120ms ease-out, level change 200ms ease-out, repair 180ms ease-out, destroyed 300ms ease-out, all `transform` + `opacity` only.
+- Color palette from 4c applied exactly; all 6 parts share same 4-state palette.
+- `prefers-reduced-motion` verified: instant state swaps, no flashes, no pulses.
+- Part hit flash telegraphs the hit part unambiguously (spatial consistency, apple-design P7).
+- Part state transition is interruptible (hit during repair cancels cleanly, apple-design P3).
+- `impeccable harden` edge cases pass: hit on already-destroyed part, rapid repair/redamage, window resize, rapid sequential hits.
 
 **M5 — Full-screen + DOM removal** (Codex + supporting engineer)
 - Canvas fills window; remove gameplay DOM HUD; keep connect dialog + demo input.
