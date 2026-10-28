@@ -5,7 +5,7 @@ import {
 } from './game';
 
 export type RoundPhase = 'ready' | 'playing' | 'won' | 'lost';
-export type PartId = 'engine' | 'hull' | 'avionics' | 'fuel' | 'comms' | 'life_support';
+export type PartId = 'engine' | 'hull' | 'avionics';
 export type PartLevel = 0 | 1 | 2 | 3;
 export interface PlanePart { id: PartId; level: PartLevel }
 export interface PlaneState { parts: Map<PartId, PlanePart>; destroyedCount: number; repairCredits: number }
@@ -76,9 +76,9 @@ export interface GameState {
 }
 export interface ParsedWireCommand extends Cell { boardId: number; kind: TileKind; label: string; actorId: string }
 
-export const PART_IDS: PartId[] = ['engine', 'hull', 'avionics', 'fuel', 'comms', 'life_support'];
+export const PART_IDS: PartId[] = ['engine', 'hull', 'avionics'];
 export const PART_LABELS: Record<PartId, string> = {
-  engine: 'ENGINE', hull: 'HULL', avionics: 'AVIONICS', fuel: 'FUEL', comms: 'COMMS', life_support: 'LIFE SUPPORT',
+  engine: 'ENGINE', hull: 'HULL', avionics: 'AVIONICS',
 };
 const PART_LEVEL_NAMES = ['OPERATIONAL', 'DAMAGED', 'CRITICAL', 'DESTROYED'] as const;
 
@@ -519,9 +519,9 @@ export function computePlaneMultipliers(state: GameState): PlaneMultipliers {
     speedMult: at(config.PLANE_ENGINE_SPEED_MULTIPLIERS, 'engine'),
     invulnSeconds: at(config.PLANE_HULL_INVULN_SECONDS, 'hull'),
     turnMult: at(config.PLANE_AVIONICS_TURN_MULTIPLIERS, 'avionics'),
-    attackRateMult: at(config.PLANE_FUEL_ATTACK_RATE_MULTIPLIERS, 'fuel'),
-    commandCooldownMult: at(config.PLANE_COMMS_COMMAND_COOLDOWN_MULTIPLIERS, 'comms'),
-    shakeMult: at(config.PLANE_LIFE_SUPPORT_SHAKE_MULTIPLIERS, 'life_support'),
+    attackRateMult: 1,
+    commandCooldownMult: 1,
+    shakeMult: 1,
   };
 }
 

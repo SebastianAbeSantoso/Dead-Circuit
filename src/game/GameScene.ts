@@ -10,7 +10,7 @@ import { GAME_CONFIG } from '../core/config';
 const WIDTH = 1600;
 const HEIGHT = 900;
 const CELL = 74;
-const BOARD_Y = 300;
+const BOARD_Y = 260;
 const BOARD_ORIGIN_X = 82;
 const PART_WIDTH = 210;
 const PART_HEIGHT = 58;
@@ -80,7 +80,7 @@ export class GameScene extends Phaser.Scene {
     this.add.text(BOARD_ORIGIN_X, 229, 'POWER ROUTING', { fontFamily: FONT_DISPLAY, fontSize: '18px', color: '#6ef0d6', fontStyle: 'bold', letterSpacing: 2 }).setOrigin(0, 0.5).setDepth(3);
     this.boardTitle = this.add.text(BOARD_ORIGIN_X, 251, '', { fontFamily: FONT_DATA, fontSize: '12px', color: '#dbe9ee', letterSpacing: 0.6 }).setOrigin(0, 0.5).setDepth(3);
     this.boardPage = this.add.text(632, 229, '', { fontFamily: FONT_DATA, fontSize: '11px', color: '#93a8b6' }).setOrigin(0.5, 0.5).setDepth(3);
-    this.repairStatus = this.add.text(711, 630, '', { fontFamily: FONT_DATA, fontSize: '10px', color: '#6ef0d6' }).setOrigin(1, 0.5).setDepth(3);
+    this.repairStatus = this.add.text(711, 700, '', { fontFamily: FONT_DATA, fontSize: '10px', color: '#6ef0d6' }).setOrigin(1, 0.5).setDepth(3);
     this.exitText = this.add.text(FLIGHT_ARENA.x + FLIGHT_ARENA.width / 2, FLIGHT_ARENA.y + 29, 'EXIT LOCKED', { fontFamily: FONT_DATA, fontSize: '11px', color: '#ffd17d', fontStyle: 'bold', letterSpacing: 1.5 }).setOrigin(0.5, 0.5).setDepth(3);
     this.twitchStatus = this.add.text(1164, 45, 'DEMO MODE', { fontFamily: FONT_DATA, fontSize: '11px', color: '#f3c575', letterSpacing: 1.4 }).setOrigin(1, 0.5).setDepth(3);
 
@@ -144,6 +144,7 @@ export class GameScene extends Phaser.Scene {
     this.pendingPilotHits = 0;
     beginRound(this.state);
     this.refreshBoardLabels();
+    this.updatePartWidgets();
     this.lastReportedEvent = '';
     this.drawBoard();
   }
@@ -279,7 +280,7 @@ export class GameScene extends Phaser.Scene {
       const column = index % 3;
       const row = Math.floor(index / 3);
       const x = 68 + column * (PART_WIDTH + PART_GAP);
-      const y = 660 + row * (PART_HEIGHT + 8);
+      const y = 720 + row * (PART_HEIGHT + 8);
       const root = this.add.container(x, y).setDepth(3);
       const background = this.add.graphics();
       const flash = this.add.graphics().setAlpha(0);
@@ -291,7 +292,7 @@ export class GameScene extends Phaser.Scene {
       this.partWidgets.set(id, widget);
       this.drawPartWidget(widget, 0);
     });
-    this.add.text(68, 640, 'AIRFRAME SYSTEMS', { fontFamily: FONT_DISPLAY, fontSize: '18px', color: '#dbe9ee', fontStyle: 'bold', letterSpacing: 1.8 }).setOrigin(0, 0.5).setDepth(3);
+    this.add.text(68, 700, 'AIRFRAME SYSTEMS', { fontFamily: FONT_DISPLAY, fontSize: '18px', color: '#dbe9ee', fontStyle: 'bold', letterSpacing: 1.8 }).setOrigin(0, 0.5).setDepth(3);
   }
 
   private drawPartWidget(widget: PartWidget, level: PartLevel): void {
@@ -319,15 +320,6 @@ export class GameScene extends Phaser.Scene {
       g.lineBetween(15, 28, 22, 35); g.lineBetween(22, 35, 35, 21);
     } else if (id === 'avionics') {
       g.strokeCircle(25, 28, 16); g.strokeCircle(25, 28, 7); g.lineBetween(25, 5, 25, 19); g.lineBetween(25, 37, 25, 51); g.lineBetween(2, 28, 18, 28); g.lineBetween(32, 28, 48, 28);
-    } else if (id === 'fuel') {
-      g.beginPath(); g.moveTo(25, 7); g.lineTo(39, 27); g.lineTo(39, 34); g.lineTo(34, 43); g.lineTo(25, 48); g.lineTo(16, 43); g.lineTo(11, 34); g.lineTo(11, 27); g.closePath(); g.strokePath();
-      g.lineBetween(18, 33, 32, 33);
-    } else if (id === 'comms') {
-      g.fillCircle(25, 42, 3); g.lineBetween(25, 39, 25, 31); g.beginPath(); g.arc(25, 29, 9, Phaser.Math.DegToRad(210), Phaser.Math.DegToRad(330), false); g.strokePath();
-      g.beginPath(); g.arc(25, 27, 16, Phaser.Math.DegToRad(210), Phaser.Math.DegToRad(330), false); g.strokePath();
-    } else {
-      g.strokeCircle(25, 29, 16); g.strokeCircle(25, 29, 9); g.lineBetween(25, 10, 25, 19); g.lineBetween(25, 39, 25, 48); g.lineBetween(6, 29, 16, 29); g.lineBetween(34, 29, 44, 29);
-      g.fillCircle(25, 29, 3);
     }
   }
 
@@ -448,7 +440,6 @@ export class GameScene extends Phaser.Scene {
     g.lineStyle(1, 0xffffff, 0.8); g.strokeCircle(this.state.shipX, this.state.shipY, 7);
     g.fillStyle(0xffffff, 1); g.fillCircle(this.state.shipX, this.state.shipY, 3.3);
     if (this.state.hitCooldown > 0) { g.lineStyle(2, 0x9cf4ff, 0.72); g.strokeCircle(this.state.shipX, this.state.shipY, 16); }
-    if (this.state.plane.parts.get('life_support')?.level === 3) this.drawLifeSupportVignette(g);
     this.drawCornerDetails(g);
   }
 
@@ -500,18 +491,6 @@ export class GameScene extends Phaser.Scene {
     g.lineBetween(endpoints[ports[0]][0], endpoints[ports[0]][1], centerX, centerY); g.lineBetween(centerX, centerY, endpoints[ports[1]][0], endpoints[ports[1]][1]);
     g.lineStyle(powered ? 4 : 3, color, 1); g.lineBetween(endpoints[ports[0]][0], endpoints[ports[0]][1], centerX, centerY); g.lineBetween(centerX, centerY, endpoints[ports[1]][0], endpoints[ports[1]][1]);
     g.fillStyle(powered ? 0x9bf8e8 : 0xb1c1cf, 1); g.fillCircle(centerX, centerY, 3);
-  }
-
-  private drawLifeSupportVignette(g: Phaser.GameObjects.Graphics): void {
-    const rings = 8;
-    for (let i = 0; i < rings; i++) {
-      const inset = i * 7; const alpha = 0.022 * (1 - i / rings);
-      g.fillStyle(0x420b13, alpha);
-      g.fillRect(inset, inset, WIDTH - inset * 2, 8);
-      g.fillRect(inset, HEIGHT - inset - 8, WIDTH - inset * 2, 8);
-      g.fillRect(inset, inset + 8, 8, HEIGHT - inset * 2 - 16);
-      g.fillRect(WIDTH - inset - 8, inset + 8, 8, HEIGHT - inset * 2 - 16);
-    }
   }
 
   private drawCornerDetails(g: Phaser.GameObjects.Graphics): void {
