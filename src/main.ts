@@ -26,7 +26,7 @@ const game = new Phaser.Game({
 const overlay = $('round-overlay');
 const overlayTitle = $('overlay-title');
 const overlayCopy = $('overlay-copy');
-const gameFrame = $('game-frame') as HTMLElement;
+const gameFrame = document.querySelector('.game-frame') as HTMLElement;
 
 /** emil-design-eng: screen shake on hit — transient, interruptible, then cleanup. */
 function shakeGameFrame(): void {
