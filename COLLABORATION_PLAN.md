@@ -106,9 +106,21 @@ Flag any assumption that looks wrong early.
 
 Config extraction is complete. Tests and future refactoring remain available as supporting-engineer work; keep Twitch and game logic in their current ownership areas.
 
-## 9. Staying in sync
+## 9. Active design direction — Plane Systems
+
+See `PLANE_SYSTEMS_PLAN.md` for the full spec. Summary of the shift:
+
+- **Full-screen Phaser canvas** (`window.innerWidth × window.innerHeight`, `Scale.RESIZE`), replacing the centered 1240×760 canvas.
+- **Remove all gameplay DOM HUD** (danger meter, board overview, command dock, event strip, footer, briefing). Keep only the connect dialog and demo command input as DOM.
+- **Plane damage system:** 6 parts (Engine, Hull, Avionics, Fuel, Comms, Life Support), each with states Operational → Damaged → Critical → Destroyed. Pilot hit escalates a random part; repair decrements it. All 6 Destroyed = loss. Each part state changes a gameplay multiplier (speed, turn, drain, cooldown, shake).
+- Loss condition moves from `danger >= 100` to `isPlaneDestroyed(state)`.
+
+Update `COLLABORATION_PLAN.md` sections 1, 3, 4, 6, 8 to match as Codex implements.
+
+## 10. Staying in sync
 
 - Update this plan when responsibilities, interfaces, or the design change.
 - Prefer small, independently useful changes Codex can integrate easily.
 - When a task sits on the boundary, flag it rather than assuming ownership.
 - Don't block on approval for small decisions; communicate substantial overlaps or interface changes.
+
