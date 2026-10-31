@@ -32,39 +32,6 @@ For Standard Routing, route `CORE` → `DRIVE` around randomized hull damage. Fo
 
 ---
 
-## The problem
-
-Streamers need interactions that viewers can join in seconds, without downloading anything, installing a bot, or learning a complex command vocabulary. Most Twitch extensions either passive-watch or force viewers through menus — bad for a regular audience that just wants to type something and see an immediate effect on screen.
-
-Dead Circuit goes the other way: keep the input as simple as possible, and make every chat message change the game state visibly and immediately. The streamer has a real task (dodge bullets), chat has a real task (route power), and both roles share the same aircraft damage and extraction stakes.
-
----
-
-## Why this generalizes
-
-The Twitch-integrated puzzle is the demonstration, not the contribution. Nothing in `src/core/multiGame.ts` names Twitch — game rules, board generation, power tracing, and round win/loss are pure TypeScript, independent of Phaser rendering and the Twitch adapter. The same core serves local demo input, Twitch chat commands, and future input sources (overlay, mobile companion, etc.).
-
-Any task where the output is a bounded command applied to shared state fits the same pipeline: collaborative drawing, shared inventory management, group rhythm games, or a different trade. What the prototype establishes is that a small, deterministic game core plus a thin input adapter makes a Twitch-integrated game testable without a live audience.
-
----
-
-## Architecture
-
-```
-Keyboard / Demo input  ─┐
-Twitch EventSub adapter ─┼─> normalized command  ─> game core (multiGame.ts)  ─> Phaser scene (render)
-                          (ParsedWireCommand)    (pure TS, testable headless)  (GameScene.ts)
-```
-
-- **Input adapters** translate keyboard and Twitch chat into the same command shape (`ParsedWireCommand`).
-- **Game core** owns state, rules, power tracing, map generation, and projectile patterns. It does not import Phaser or Twitch.
-- **Render/UI** draws the board, ship, bullets, and HUD; reads state via `onEvent` / `onState` callbacks.
-- **DOM shell** (`index.html`, `style.css`, `main.ts`) owns the accessible flight desk, campaign dialogs and settings, Twitch connection, demo input, and transient command feedback.
-
----
-
-## Design decisions
-
 ### One command grammar, two roles
 
 ```
@@ -85,38 +52,9 @@ Board capacity scales from unique Twitch `chatter_user_id` values in a rolling t
 
 Each board has its own ID, seed, grid, and solved state. The streamer selects which board page is shown on screen, but viewers can target any active board with its `!bN` prefix. Extraction requires every board created during the run to be powered, so chat must coordinate across boards, not just camp on B1.
 
-### No warning labels on danmaku
-
-Four original pattern families arrive without pre-attack telegraphs: fast needles, slow heavy rounds, radial spokes, and edge rakes with a deliberate gap. Every emission stays at least 160 logical pixels from the pilot; aimed needles retain at least 0.7 seconds of travel time. The pilot threads gaps; chat routes power; the round ends in minutes.
-
 ### Campaign and settings
 
 One campaign profile is saved locally in the browser. Standard victory unlocks the existing AND-gate mission. **Continue** starts the earliest unlocked incomplete mission as a fresh sortie; once both missions are complete, it opens replay selection. **New Save** asks before resetting campaign progress and leaves display settings intact. Fullscreen, interface scale, reduced motion, and screen shake are stored separately. Twitch tokens are not written to browser storage. Saves remain local to this browser origin and are not synced.
-
----
-
-## Repo structure
-
-```
-.
-├── index.html                    DOM shell + HUD
-├── src/style.css                 Stream-size layout and theming
-├── src/main.ts                   Twitch + scene + HUD wiring
-├── src/core/config.ts            Tuning constants (damage, speed, patterns, scaling)
-├── src/core/game.ts              Level definitions, tile kinds, board templates
-├── src/core/multiGame.ts         Game state, rules, power tracing, seeded maps, danmaku
-├── src/core/campaign.ts          Campaign progression and versioned local save decoding
-├── src/game/GameScene.ts         Phaser scene: drawing, ship input, board selection
-├── src/twitch/TwitchChat.ts      OAuth, EventSub WebSocket, command parsing, demo mode
-├── package.json                  Phaser 4 + Vite + TypeScript
-├── tsconfig.json
-├── COLLABORATION_PLAN.md         Shared plan for Codex + supporting engineer
-├── GDD.md                        Game design document
-├── IMPLEMENTATION_PLAN.md        Solo-dev implementation history
-└── README.md
-```
-
-The AI / backend / frontend split is readable straight from the layout: game rules are touched in exactly `multiGame.ts` and `game.ts`, rendering lives in `GameScene.ts`, Twitch integration lives in `TwitchChat.ts`, and integration glue lives in `main.ts`.
 
 ---
 
@@ -159,30 +97,6 @@ Built with `npm run dev` (Vite, port 5173) or `npm run build` (type-check + stat
 - **Small evaluation surface.** Generated board candidates are validated with the live power rules, and seed determinism/fair projectile spacing have been sampled locally. Stream-scale balance and live audience pacing still need real-channel play.
 - **Chunk size warning.** The Vite bundle exceeds 500 KB minified (mostly Phaser). Acceptable for a prototype; code-splitting the Twitch adapter is a follow-up.
 - **`.env.local` never committed.** Set `VITE_TWITCH_CLIENT_ID` locally if you want to skip entering the Client ID each time; never commit a Twitch client secret.
-
----
-
-## Status
-
-**Done**
-- Phaser 4 + TypeScript + Vite; production build passes
-- Standard and AND-gate board templates playable locally
-- Replaceable wires, short penalty, power recalculation on every placement
-- Scalable multi-board via unique active chatters (~100 per board, cap 100)
-- Seeded randomized Standard and gate layouts; every displayed candidate validated with `calculatePower`
-- Four varied no-warning projectile patterns with ship-relative safe emission distance
-- Campaign flight desk, Continue/New Save flow, Standard-to-AND unlock, mission replay
-- Fullscreen, interface scale, reduced motion, and screen shake settings
-- Ship collision core, hit invulnerability, six-part damage/repair, win/loss rounds
-- Twitch EventSub adapter with OAuth, reconnect, deduplication, per-viewer pacing
-- Local demo mode + scaling simulation (+100 / +1,000 / +10,000 chatters, simulate hit)
-- `COLLABORATION_PLAN.md` for Codex + supporting engineer collaboration
-
-**Next**
-- Live Twitch smoke session on a real channel and HTTPS hosting
-- Stream-scale playthroughs to tune pattern density, readability, and board growth
-- Code-split Phaser or the Twitch adapter to shrink the prototype bundle
-- Add automated core-rule tests when a test runner is selected
 
 ---
 
